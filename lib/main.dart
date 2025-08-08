@@ -22,6 +22,12 @@ import 'presentation/screens/auth/register_screen.dart';
 import 'presentation/screens/user/user_dashboard.dart';
 import 'presentation/screens/admin/admin_dashboard.dart';
 
+// ADD THESE NEW IMPORTS
+import 'presentation/screens/user/add_contribution_screen.dart';
+import 'presentation/screens/user/my_contributions_screen.dart';
+import 'presentation/screens/user/borrow_request_screen.dart';
+import 'presentation/screens/admin/admin_approval_dashboard.dart';
+
 // Import theme
 import 'core/theme/app_theme.dart';
 
@@ -95,7 +101,7 @@ class ShareStationApp extends StatelessWidget {
                   GlobalCupertinoLocalizations.delegate,
                 ],
 
-                // Routes
+                // Routes - UPDATED WITH NEW ROUTES
                 initialRoute: AppRoutes.splash,
                 routes: {
                   AppRoutes.splash: (context) => const SplashScreen(),
@@ -103,9 +109,30 @@ class ShareStationApp extends StatelessWidget {
                   AppRoutes.register: (context) => const RegisterScreen(),
                   AppRoutes.userDashboard: (context) => const MainLayout(),
                   AppRoutes.adminDashboard: (context) => const MainLayout(),
-                  // Add more routes as we create the screens
+
+                  // ADD THESE NEW ROUTES
+                  '/add-contribution': (context) => const AddContributionScreen(),
+                  '/my-contributions': (context) => const MyContributionsScreen(),
+                  '/admin-approval-dashboard': (context) => const AdminApprovalDashboard(),
                 },
-                // onGenerateRoute: RouteGenerator.generateRoute,
+
+                // ADD THIS onGenerateRoute FOR ROUTES WITH PARAMETERS
+                onGenerateRoute: (settings) {
+                  // Handle BorrowRequestScreen which needs a game parameter
+                  if (settings.name == '/borrow-request') {
+                    final args = settings.arguments as Map<String, dynamic>?;
+                    if (args != null && args['game'] != null) {
+                      return MaterialPageRoute(
+                        builder: (context) => BorrowRequestScreen(
+                          game: args['game'],
+                        ),
+                      );
+                    }
+                  }
+
+                  // Return null for unhandled routes
+                  return null;
+                },
 
                 // Builder for RTL support
                 builder: (context, widget) {

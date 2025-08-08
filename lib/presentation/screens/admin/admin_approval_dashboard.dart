@@ -51,49 +51,53 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
       final memberships = await _firestore
           .collection('users')
           .where('status', isEqualTo: 'pending')
-          .count()
           .get();
 
-      // Count pending game contributions
+      // Count pending game contributions (simplified query)
       final games = await _firestore
           .collection('contribution_requests')
           .where('status', isEqualTo: 'pending')
-          .where('type', isEqualTo: 'game')
-          .count()
           .get();
 
       // Count pending fund contributions
       final funds = await _firestore
           .collection('fund_contribution_requests')
           .where('status', isEqualTo: 'pending')
-          .count()
           .get();
 
       // Count pending borrow requests
       final borrows = await _firestore
           .collection('borrow_requests')
           .where('status', isEqualTo: 'pending')
-          .count()
           .get();
 
       // Count pending return requests
       final returns = await _firestore
           .collection('return_requests')
           .where('status', isEqualTo: 'pending')
-          .count()
           .get();
 
       if (mounted) {
         setState(() {
-          _pendingMemberships = memberships.count ?? 0;
-          _pendingGames = games.count ?? 0;
-          _pendingFunds = funds.count ?? 0;
-          _pendingBorrows = borrows.count ?? 0;
-          _pendingReturns = returns.count ?? 0;
+          _pendingMemberships = memberships.docs.length;
+          _pendingGames = games.docs.length;
+          _pendingFunds = funds.docs.length;
+          _pendingBorrows = borrows.docs.length;
+          _pendingReturns = returns.docs.length;
         });
       }
     } catch (e) {
       print('Error loading pending counts: $e');
+      // Set to 0 if error occurs
+      if (mounted) {
+        setState(() {
+          _pendingMemberships = 0;
+          _pendingGames = 0;
+          _pendingFunds = 0;
+          _pendingBorrows = 0;
+          _pendingReturns = 0;
+        });
+      }
     }
   }
 
@@ -398,8 +402,6 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
       stream: _firestore
           .collection('contribution_requests')
           .where('status', isEqualTo: 'pending')
-          .where('type', isEqualTo: 'game')
-          .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -415,7 +417,11 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
           );
         }
 
-        final requests = snapshot.data?.docs ?? [];
+        // Filter for game type in memory
+        final requests = snapshot.data?.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['type'] == 'game' || data['type'] == null;
+        }).toList() ?? [];
 
         if (requests.isEmpty) {
           return Center(

@@ -47,6 +47,8 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   final _fundAmountController = TextEditingController();
   File? _paymentReceiptImage;
   String? _selectedFundGameId;
+  // FIX: Added variable to hold the selected game's data.
+  Map<String, dynamic>? _selectedFundGame;
   List<Map<String, dynamic>> _availableFundGames = [];
 
   // --- Selected Values ---
@@ -214,8 +216,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
   // Submit fund contribution REQUEST with receipt
   Future<void> _submitFundContributionRequest() async {
-    // This function appears correct and does not need changes.
-    if (_selectedFundGameId == null) {
+    if (_selectedFundGameId == null || _selectedFundGame == null) {
       Fluttertoast.showToast(msg: 'Please select a game to fund', backgroundColor: AppTheme.warningColor);
       return;
     }
@@ -251,16 +252,12 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         throw Exception('Failed to upload receipt');
       }
 
-      final selectedGame = _availableFundGames.firstWhere(
-            (game) => game['id'] == _selectedFundGameId,
-      );
-
       await _firestore.collection('fund_contribution_requests').add({
         'userId': currentUser.uid,
         'userName': currentUser.name,
         'userTier': currentUser.tier.name,
         'gameId': _selectedFundGameId,
-        'gameTitle': selectedGame['title'],
+        'gameTitle': _selectedFundGame!['title'], // FIX: Use the selected game data
         'amount': amount,
         'paymentMethod': _selectedPaymentMethod,
         'receiptUrl': receiptUrl,
@@ -280,6 +277,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
       setState(() {
         _paymentReceiptImage = null;
         _selectedFundGameId = null;
+        _selectedFundGame = null; // FIX: Clear the selected game data
       });
       Navigator.pop(context);
     } catch (e) {
@@ -738,14 +736,13 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   }
 
   Widget _buildFundContributionTab(bool isArabic, bool isDarkMode) {
-    // This entire widget seems correct and requires no changes.
     return SingleChildScrollView(
       padding: EdgeInsets.all(16.w),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isArabic ? 'الألعاب المتاحة للتمويل:' : 'Games Available for Funding:',
+            isArabic ? 'اختر لعبة للتمويل:' : 'Select a Game to Fund:',
             style: TextStyle(
               fontSize: 18.sp,
               fontWeight: FontWeight.bold,
@@ -755,22 +752,70 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
           if (_availableFundGames.isEmpty)
             Center(
-              child: Text(
-                isArabic
-                    ? 'لا توجد ألعاب متاحة للتمويل حالياً'
-                    : 'No games available for funding currently',
-                style: TextStyle(
-                  fontSize: 14.sp,
-                  color: Colors.grey,
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 24.h),
+                child: Text(
+                  isArabic
+                      ? 'لا توجد ألعاب متاحة للتمويل حالياً'
+                      : 'No games available for funding currently',
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    color: Colors.grey,
+                  ),
                 ),
               ),
             )
           else
-            ...(_availableFundGames.map((game) => _buildFundGameCard(
-              game,
-              isArabic,
-              isDarkMode,
-            )).toList()),
+          // FIX: Replaced the card list with a DropdownButtonFormField.
+            DropdownButtonFormField<String>(
+              value: _selectedFundGameId,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: isArabic ? 'اختر اللعبة' : 'Select Game',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.r),
+                ),
+              ),
+              items: _availableFundGames.map((game) {
+                return DropdownMenuItem<String>(
+                  value: game['id'], // Use document ID as unique value
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        game['title'] ?? 'Unknown Game',
+                        style: TextStyle(fontSize: 14.sp),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${game['currentFunding']?.toStringAsFixed(0) ?? '0'} / ${game['targetPrice']?.toStringAsFixed(0) ?? '0'} LE',
+                        style: TextStyle(
+                          fontSize: 12.sp,
+                          color: AppTheme.primaryColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedFundGameId = value;
+                  if (value != null) {
+                    _selectedFundGame = _availableFundGames.firstWhere((doc) => doc['id'] == value);
+                  } else {
+                    _selectedFundGame = null;
+                  }
+                });
+              },
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return isArabic ? 'يرجى اختيار لعبة' : 'Please select a game';
+                }
+                return null;
+              },
+            ),
 
           if (_selectedFundGameId != null) ...[
             SizedBox(height: 24.h),
@@ -823,6 +868,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
               borderRadius: BorderRadius.circular(12.r),
               child: Container(
                 height: 150.h,
+                width: double.infinity,
                 decoration: BoxDecoration(
                   border: Border.all(
                     color: AppTheme.primaryColor,
@@ -833,7 +879,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
                 ),
                 child: _paymentReceiptImage != null
                     ? ClipRRect(
-                  borderRadius: BorderRadius.circular(12.r),
+                  borderRadius: BorderRadius.circular(11.r),
                   child: Image.file(
                     _paymentReceiptImage!,
                     fit: BoxFit.cover,
@@ -1058,6 +1104,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
   // --- Helper Widgets ---
 
+  // NOTE: This widget is no longer used but kept for potential future reference.
   Widget _buildFundGameCard(
       Map<String, dynamic> game,
       bool isArabic,
