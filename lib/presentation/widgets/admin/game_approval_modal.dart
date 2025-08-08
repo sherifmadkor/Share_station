@@ -8,8 +8,11 @@ import 'package:fluttertoast/fluttertoast.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/game_model.dart';
-import '../../../data/models/user_model.dart';
+import '../../../data/models/game_model.dart' hide Platform;
+import '../../../data/models/user_model.dart' as user_model;
+
+// Create Platform enum alias to avoid conflicts
+typedef GamePlatform = user_model.Platform;
 
 class GameApprovalModal extends StatefulWidget {
   final String requestId;
@@ -30,271 +33,226 @@ class GameApprovalModal extends StatefulWidget {
 class _GameApprovalModalState extends State<GameApprovalModal> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Form controllers
-  final _gameValueController = TextEditingController();
-  final _borrowPriceController = TextEditingController();
-  final _notesController = TextEditingController();
-  final _expiryDaysController = TextEditingController();
+  // Form fields
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _valueController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _descriptionController = TextEditingController();
 
-  // Game properties
-  String _selectedEdition = 'Standard';
+  // Selected options
+  GamePlatform? _selectedPlatform;
+  AccountType? _selectedAccountType;
   String _selectedRegion = 'Global';
-  LenderTier _selectedLenderTier = LenderTier.member;
-
-  // Slot availability
-  bool _ps4PrimaryEnabled = false;
-  bool _ps5PrimaryEnabled = false;
-  bool _secondaryEnabled = false;
-
+  String _selectedEdition = 'Standard';
   bool _isProcessing = false;
+
+  // Platform options
+  final List<GamePlatform> _platforms = [
+    GamePlatform.ps4,
+    GamePlatform.ps5,
+  ];
+
+  // Account type options
+  final List<AccountType> _accountTypes = [
+    AccountType.primary,
+    AccountType.secondary,
+    AccountType.full,
+    AccountType.psPlus,
+  ];
+
+  // Region options
+  final List<String> _regions = [
+    'Global',
+    'US',
+    'Europe',
+    'Asia',
+    'Middle East',
+  ];
+
+  // Edition options
+  final List<String> _editions = [
+    'Standard',
+    'Deluxe',
+    'Gold',
+    'Ultimate',
+    'Collector\'s',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _initializeFromContribution();
+    _initializeFormData();
   }
 
-  void _initializeFromContribution() {
-    // Pre-fill from contribution request
-    final data = widget.contributionData;
+  void _initializeFormData() {
+    // Pre-fill form with contribution data
+    _titleController.text = widget.contributionData['gameTitle'] ?? '';
+    _valueController.text = widget.contributionData['gameValue']?.toString() ?? '0';
+    _emailController.text = widget.contributionData['email'] ?? '';
+    _passwordController.text = widget.contributionData['password'] ?? '';
+    _descriptionController.text = widget.contributionData['description'] ?? '';
 
-    // Set edition and region from contribution
-    _selectedEdition = data['edition'] ?? 'Standard';
-    _selectedRegion = data['region'] ?? 'Global';
-
-    // Determine which slots to enable based on account type
-    final accountType = data['accountType'];
-    final platform = data['platform'];
-
-    if (accountType == 'psPlus' || accountType == 'full') {
-      // PS Plus and Full accounts have all slots
-      _ps4PrimaryEnabled = true;
-      _ps5PrimaryEnabled = true;
-      _secondaryEnabled = true;
-    } else if (accountType == 'primary') {
-      // Primary account - enable only the relevant platform
-      if (platform == 'ps4') {
-        _ps4PrimaryEnabled = true;
-      } else if (platform == 'ps5') {
-        _ps5PrimaryEnabled = true;
+    // Set platform from contribution data
+    final platformString = widget.contributionData['platform']?.toString().toLowerCase();
+    if (platformString != null) {
+      try {
+        _selectedPlatform = GamePlatform.values.firstWhere(
+              (p) => p.name.toLowerCase() == platformString,
+          orElse: () => GamePlatform.ps5,
+        );
+      } catch (e) {
+        _selectedPlatform = GamePlatform.ps5;
       }
-    } else if (accountType == 'secondary') {
-      // Secondary account
-      _secondaryEnabled = true;
+    } else {
+      _selectedPlatform = GamePlatform.ps5;
     }
 
-    // Set default game value based on account type (can be overridden by admin)
-    double defaultValue = 100;
-    if (accountType == 'secondary') defaultValue = 75;
-    if (accountType == 'full') defaultValue = 150;
-    if (accountType == 'psPlus') defaultValue = 200;
+    // Set account type from contribution data
+    final accountTypeString = widget.contributionData['accountType']?.toString().toLowerCase();
+    if (accountTypeString != null) {
+      try {
+        _selectedAccountType = AccountType.values.firstWhere(
+              (a) => a.name.toLowerCase() == accountTypeString,
+          orElse: () => AccountType.primary,
+        );
+      } catch (e) {
+        _selectedAccountType = AccountType.primary;
+      }
+    } else {
+      _selectedAccountType = AccountType.primary;
+    }
 
-    _gameValueController.text = defaultValue.toStringAsFixed(0);
-    _borrowPriceController.text = defaultValue.toStringAsFixed(0);
+    _selectedRegion = widget.contributionData['region'] ?? 'Global';
+    _selectedEdition = widget.contributionData['edition'] ?? 'Standard';
   }
 
-  double _calculateStationLimit() {
-    final gameValue = double.tryParse(_gameValueController.text) ?? 0;
-    final accountType = widget.contributionData['accountType'];
-
-    // Station Limit calculation per BRD
-    switch (accountType) {
-      case 'primary':
-        return gameValue; // 100% of admin-set value
-      case 'secondary':
-        return gameValue * 0.75; // 75% of admin-set value
-      case 'full':
-        return gameValue * 1.5; // 150% of admin-set value
-      case 'psPlus':
-        return gameValue * 2.0; // 200% of admin-set value
-      default:
-        return gameValue;
-    }
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _valueController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
   }
 
   Future<void> _approveGameContribution() async {
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
-    final isArabic = appProvider.isArabic;
-
-    // Validate inputs
-    if (_gameValueController.text.isEmpty || _borrowPriceController.text.isEmpty) {
-      Fluttertoast.showToast(
-        msg: isArabic
-            ? 'يرجى إدخال قيمة اللعبة وسعر الاستعارة'
-            : 'Please enter game value and borrow price',
-        backgroundColor: AppTheme.errorColor,
-      );
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedPlatform == null || _selectedAccountType == null) {
+      _showErrorMessage('Please select platform and account type');
       return;
     }
 
     setState(() => _isProcessing = true);
 
     try {
-      final data = widget.contributionData;
-      final gameValue = double.parse(_gameValueController.text);
-      final borrowPrice = double.parse(_borrowPriceController.text);
-      final stationLimitIncrease = _calculateStationLimit();
+      // Create slots based on platform and account type
+      Map<String, dynamic> slots = {};
+      final slotKey = '${_selectedPlatform!.name}_${_selectedAccountType!.name}';
+      slots[slotKey] = {
+        'platform': _selectedPlatform!.name,
+        'accountType': _selectedAccountType!.name,
+        'status': 'available',
+        'borrowerId': null,
+        'borrowDate': null,
+        'expectedReturnDate': null,
+        'reservationDate': null,
+        'reservedById': null,
+      };
 
-      // Create game slots based on enabled options
-      final Map<String, dynamic> slots = {};
-
-      if (_ps4PrimaryEnabled) {
-        slots['ps4_primary'] = {
-          'platform': 'ps4',
-          'accountType': 'primary',
-          'status': 'available',
-          'email': data['accountEmail'],
-          'password': data['accountPassword'],
-        };
-      }
-
-      if (_ps5PrimaryEnabled) {
-        slots['ps5_primary'] = {
-          'platform': 'ps5',
-          'accountType': 'primary',
-          'status': 'available',
-          'email': data['accountEmail'],
-          'password': data['accountPassword'],
-        };
-      }
-
-      if (_secondaryEnabled) {
-        slots['secondary'] = {
-          'platform': data['platform'] ?? 'ps4',
-          'accountType': 'secondary',
-          'status': 'available',
-          'email': data['accountEmail'],
-          'password': data['accountPassword'],
-        };
-      }
-
-      // Check if game already exists
-      final existingGames = await _firestore
-          .collection('games')
-          .where('title', isEqualTo: data['gameTitle'])
-          .limit(1)
-          .get();
-
-      String gameId;
-
-      if (existingGames.docs.isNotEmpty) {
-        // Update existing game with new slots
-        gameId = existingGames.docs.first.id;
-
-        await _firestore.collection('games').doc(gameId).update({
-          'slots': FieldValue.arrayUnion([slots]),
-          'contributors': FieldValue.arrayUnion([{
-            'userId': data['contributorId'],
-            'userName': data['contributorName'],
-            'contributedAt': DateTime.now().toIso8601String(),
-            'sharePercentage': 0, // Will be recalculated
-          }]),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      } else {
-        // Create new game
-        final gameDoc = {
-          'title': data['gameTitle'],
-          'description': data['description'] ?? '',
-          'gameValue': gameValue,
-          'borrowPrice': borrowPrice,
-          'edition': _selectedEdition,
-          'region': _selectedRegion,
-          'lenderTier': _selectedLenderTier.name,
-          'slots': slots,
-          'supportedPlatforms': _getSupportedPlatforms(),
-          'sharingOptions': _getSharingOptions(),
-          'contributors': [{
-            'userId': data['contributorId'],
-            'userName': data['contributorName'],
-            'contributedAt': DateTime.now().toIso8601String(),
-            'sharePercentage': 100,
-          }],
-          'isActive': true,
-          'totalCost': 0,
-          'totalRevenues': 0,
-          'borrowRevenue': 0,
-          'sellRevenue': 0,
-          'fundShareRevenue': 0,
-          'totalBorrows': 0,
-          'currentBorrows': 0,
-          'averageBorrowDuration': 0,
-          'borrowHistory': [],
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-
-        final docRef = await _firestore.collection('games').add(gameDoc);
-        gameId = docRef.id;
-      }
-
-      // Update user's station limit
-      await _firestore.collection('users').doc(data['contributorId']).update({
-        'stationLimit': FieldValue.increment(stationLimitIncrease),
-        'remainingStationLimit': FieldValue.increment(stationLimitIncrease),
-        'gameShares': FieldValue.increment(1),
-        'totalShares': FieldValue.increment(1),
+      // Prepare game document
+      final gameDoc = {
+        'title': _titleController.text.trim(),
+        'includedTitles': [_titleController.text.trim()],
+        'coverImageUrl': widget.contributionData['coverImageUrl'],
+        'description': _descriptionController.text.trim(),
+        'email': _emailController.text.trim(),
+        'password': _passwordController.text.trim(),
+        'edition': _selectedEdition,
+        'region': _selectedRegion,
+        'contributorId': widget.contributionData['contributorId'],
+        'contributorName': widget.contributionData['contributorName'],
+        'lenderTier': 'member', // Default to member tier
+        'dateAdded': FieldValue.serverTimestamp(),
+        'isActive': true,
+        'supportedPlatforms': [_selectedPlatform!.name],
+        'sharingOptions': [_selectedAccountType!.name],
+        'slots': slots,
+        'gameValue': double.tryParse(_valueController.text) ?? 0,
+        'totalCost': double.tryParse(_valueController.text) ?? 0,
+        'totalRevenues': 0,
+        'borrowRevenue': 0,
+        'sellRevenue': 0,
+        'fundShareRevenue': 0,
+        'totalBorrows': 0,
+        'currentBorrows': 0,
+        'averageBorrowDuration': 0,
+        'borrowHistory': [],
+        'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // Check for VIP promotion
-      final userDoc = await _firestore.collection('users').doc(data['contributorId']).get();
-      final userData = userDoc.data() as Map<String, dynamic>;
-      if (userData['totalShares'] >= 15 && userData['fundShares'] >= 5 && userData['tier'] == 'member') {
-        await _firestore.collection('users').doc(data['contributorId']).update({
-          'tier': 'vip',
-        });
-      }
+      // Add game to Firestore
+      await _firestore.collection('games').add(gameDoc);
 
       // Update contribution request status
-      await _firestore.collection('contribution_requests').doc(widget.requestId).update({
+      await _firestore
+          .collection('contribution_requests')
+          .doc(widget.requestId)
+          .update({
         'status': 'approved',
         'approvedAt': FieldValue.serverTimestamp(),
-        'approvedBy': 'admin', // Get from auth provider
-        'gameId': gameId,
-        'gameValue': gameValue,
-        'borrowPrice': borrowPrice,
-        'stationLimitIncrease': stationLimitIncrease,
-        'adminNotes': _notesController.text,
+        'approvedBy': 'admin', // Should get from auth provider
       });
 
-      Fluttertoast.showToast(
-        msg: isArabic
-            ? 'تمت الموافقة على مساهمة اللعبة'
-            : 'Game contribution approved successfully',
-        backgroundColor: AppTheme.successColor,
-      );
+      // Update contributor's statistics
+      final contributorId = widget.contributionData['contributorId'];
+      if (contributorId != null) {
+        final gameValue = double.tryParse(_valueController.text) ?? 0;
+        await _firestore.collection('users').doc(contributorId).update({
+          'gameShares': FieldValue.increment(1),
+          'totalShares': FieldValue.increment(1),
+          'stationLimit': FieldValue.increment(gameValue),
+          'remainingStationLimit': FieldValue.increment(gameValue),
+          'balance': FieldValue.increment(gameValue * 0.7), // 70% to balance
+          'lastActivityDate': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
+      // Show success message
+      _showSuccessMessage('Game approved successfully!');
+
+      // Call callback and close modal
       widget.onApproved();
     } catch (e) {
       print('Error approving game: $e');
-      Fluttertoast.showToast(
-        msg: isArabic
-            ? 'حدث خطأ في الموافقة'
-            : 'Error approving contribution',
-        backgroundColor: AppTheme.errorColor,
-      );
+      _showErrorMessage('Failed to approve game: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
+      setState(() => _isProcessing = false);
     }
   }
 
-  List<String> _getSupportedPlatforms() {
-    final platforms = <String>[];
-    if (_ps4PrimaryEnabled || _secondaryEnabled) platforms.add('ps4');
-    if (_ps5PrimaryEnabled || _secondaryEnabled) platforms.add('ps5');
-    return platforms;
+  void _showSuccessMessage(String message) {
+    Fluttertoast.showToast(
+      msg: message,
+      toastLength: Toast.LENGTH_LONG,
+      gravity: ToastGravity.BOTTOM,
+      backgroundColor: AppTheme.successColor,
+      textColor: Colors.white,
+    );
   }
 
-  List<String> _getSharingOptions() {
-    final options = <String>[];
-    if (_ps4PrimaryEnabled || _ps5PrimaryEnabled) options.add('primary');
-    if (_secondaryEnabled) options.add('secondary');
-    if (widget.contributionData['accountType'] == 'full') options.add('full');
-    if (widget.contributionData['accountType'] == 'psPlus') options.add('psPlus');
-    return options;
+  void _showErrorMessage(String message) {
+    Fluttertoast.showToast(
+      msg: message,
+      toastLength: Toast.LENGTH_LONG,
+      gravity: ToastGravity.BOTTOM,
+      backgroundColor: AppTheme.errorColor,
+      textColor: Colors.white,
+    );
   }
 
   @override
@@ -303,16 +261,15 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
     final isArabic = appProvider.isArabic;
     final isDarkMode = appProvider.isDarkMode;
 
-    final data = widget.contributionData;
-    final stationLimit = _calculateStationLimit();
-
     return Dialog(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16.r),
       ),
       child: Container(
-        width: 400.w,
-        constraints: BoxConstraints(maxHeight: 600.h),
+        width: MediaQuery.of(context).size.width * 0.9,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -321,9 +278,8 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
               padding: EdgeInsets.all(16.w),
               decoration: BoxDecoration(
                 color: AppTheme.primaryColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16.r),
-                  topRight: Radius.circular(16.r),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(16.r),
                 ),
               ),
               child: Row(
@@ -336,7 +292,7 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                   SizedBox(width: 12.w),
                   Expanded(
                     child: Text(
-                      isArabic ? 'موافقة على مساهمة اللعبة' : 'Approve Game Contribution',
+                      isArabic ? 'الموافقة على اللعبة' : 'Approve Game',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 18.sp,
@@ -353,266 +309,265 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
             ),
 
             // Content
-            Expanded(
+            Flexible(
               child: SingleChildScrollView(
                 padding: EdgeInsets.all(16.w),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Game Title
-                    Text(
-                      data['gameTitle'] ?? 'Unknown Game',
-                      style: TextStyle(
-                        fontSize: 20.sp,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    SizedBox(height: 8.h),
-
-                    // Contributor Info
-                    Row(
-                      children: [
-                        Icon(Icons.person, size: 16.sp, color: AppTheme.primaryColor),
-                        SizedBox(width: 4.w),
-                        Text(
-                          '${data['contributorName']} • ${data['accountType']?.toUpperCase()}',
-                          style: TextStyle(
-                            fontSize: 14.sp,
-                            color: isDarkMode
-                                ? AppTheme.darkTextSecondary
-                                : AppTheme.lightTextSecondary,
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Game Title
+                      TextFormField(
+                        controller: _titleController,
+                        decoration: InputDecoration(
+                          labelText: isArabic ? 'عنوان اللعبة' : 'Game Title',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.r),
                           ),
+                          prefixIcon: Icon(Icons.videogame_asset),
                         ),
-                      ],
-                    ),
-
-                    SizedBox(height: 20.h),
-
-                    // Value Settings
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _gameValueController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: isArabic ? 'قيمة اللعبة' : 'Game Value',
-                              suffixText: 'LE',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.r),
-                              ),
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-                        ),
-                        SizedBox(width: 12.w),
-                        Expanded(
-                          child: TextField(
-                            controller: _borrowPriceController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: isArabic ? 'سعر الاستعارة' : 'Borrow Price',
-                              suffixText: 'LE',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.r),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    SizedBox(height: 12.h),
-
-                    // Station Limit Display
-                    Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        color: AppTheme.infoColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8.r),
-                        border: Border.all(
-                          color: AppTheme.infoColor.withOpacity(0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 20.sp, color: AppTheme.infoColor),
-                          SizedBox(width: 8.w),
-                          Expanded(
-                            child: Text(
-                              isArabic
-                                  ? 'زيادة حد المحطة: ${stationLimit.toStringAsFixed(0)} LE'
-                                  : 'Station Limit Increase: ${stationLimit.toStringAsFixed(0)} LE',
-                              style: TextStyle(
-                                fontSize: 14.sp,
-                                color: AppTheme.infoColor,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    SizedBox(height: 20.h),
-
-                    // Edition & Region
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: _selectedEdition,
-                            decoration: InputDecoration(
-                              labelText: isArabic ? 'الإصدار' : 'Edition',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.r),
-                              ),
-                            ),
-                            items: ['Standard', 'Deluxe', 'Ultimate', 'Gold', 'Complete', 'GOTY']
-                                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() => _selectedEdition = value);
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(width: 12.w),
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: _selectedRegion,
-                            decoration: InputDecoration(
-                              labelText: isArabic ? 'المنطقة' : 'Region',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8.r),
-                              ),
-                            ),
-                            items: ['US', 'EU', 'UK', 'Asia', 'Japan', 'Global']
-                                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() => _selectedRegion = value);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    SizedBox(height: 20.h),
-
-                    // Lender Tier
-                    Text(
-                      isArabic ? 'فئة المُقرض:' : 'Lender Tier:',
-                      style: TextStyle(
-                        fontSize: 14.sp,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8.h),
-                    Wrap(
-                      spacing: 8.w,
-                      children: LenderTier.values.map((tier) {
-                        final isSelected = _selectedLenderTier == tier;
-                        return ChoiceChip(
-                          label: Text(tier.displayName),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            setState(() => _selectedLenderTier = tier);
-                          },
-                          selectedColor: _getTierColor(tier),
-                          labelStyle: TextStyle(
-                            color: isSelected ? Colors.white : null,
-                          ),
-                        );
-                      }).toList(),
-                    ),
-
-                    SizedBox(height: 20.h),
-
-                    // Available Slots
-                    Text(
-                      isArabic ? 'الفتحات المتاحة:' : 'Available Slots:',
-                      style: TextStyle(
-                        fontSize: 14.sp,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8.h),
-
-                    // Only show relevant slots based on contribution type
-                    if (data['accountType'] == 'psPlus' || data['accountType'] == 'full' || data['platform'] == 'ps4' && data['accountType'] == 'primary')
-                      CheckboxListTile(
-                        title: Text('PS4 Primary'),
-                        value: _ps4PrimaryEnabled,
-                        onChanged: (value) {
-                          setState(() => _ps4PrimaryEnabled = value ?? false);
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return isArabic
+                                ? 'الرجاء إدخال عنوان اللعبة'
+                                : 'Please enter game title';
+                          }
+                          return null;
                         },
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
                       ),
+                      SizedBox(height: 16.h),
 
-                    if (data['accountType'] == 'psPlus' || data['accountType'] == 'full' || data['platform'] == 'ps5' && data['accountType'] == 'primary')
-                      CheckboxListTile(
-                        title: Text('PS5 Primary'),
-                        value: _ps5PrimaryEnabled,
-                        onChanged: (value) {
-                          setState(() => _ps5PrimaryEnabled = value ?? false);
+                      // Game Value
+                      TextFormField(
+                        controller: _valueController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: isArabic ? 'قيمة اللعبة (LE)' : 'Game Value (LE)',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.r),
+                          ),
+                          prefixIcon: Icon(Icons.attach_money),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return isArabic
+                                ? 'الرجاء إدخال قيمة اللعبة'
+                                : 'Please enter game value';
+                          }
+                          if (double.tryParse(value) == null) {
+                            return isArabic
+                                ? 'الرجاء إدخال رقم صحيح'
+                                : 'Please enter a valid number';
+                          }
+                          return null;
                         },
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
                       ),
+                      SizedBox(height: 16.h),
 
-                    if (data['accountType'] == 'psPlus' || data['accountType'] == 'full' || data['accountType'] == 'secondary')
-                      CheckboxListTile(
-                        title: Text('Secondary'),
-                        value: _secondaryEnabled,
-                        onChanged: (value) {
-                          setState(() => _secondaryEnabled = value ?? false);
-                        },
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
+                      // Platform Selection
+                      Text(
+                        isArabic ? 'المنصة' : 'Platform',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-
-                    SizedBox(height: 20.h),
-
-                    // Admin Notes
-                    TextField(
-                      controller: _notesController,
-                      maxLines: 2,
-                      decoration: InputDecoration(
-                        labelText: isArabic ? 'ملاحظات المسؤول' : 'Admin Notes',
-                        hintText: isArabic ? 'اختياري' : 'Optional',
-                        border: OutlineInputBorder(
+                      SizedBox(height: 8.h),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12.w),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
                           borderRadius: BorderRadius.circular(8.r),
                         ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<GamePlatform>(
+                            value: _selectedPlatform,
+                            isExpanded: true,
+                            hint: Text(isArabic ? 'اختر المنصة' : 'Select Platform'),
+                            items: _platforms.map((platform) {
+                              return DropdownMenuItem(
+                                value: platform,
+                                child: Text(platform.displayName),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedPlatform = value;
+                              });
+                            },
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                      SizedBox(height: 16.h),
+
+                      // Account Type Selection
+                      Text(
+                        isArabic ? 'نوع الحساب' : 'Account Type',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 8.h),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12.w),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8.r),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<AccountType>(
+                            value: _selectedAccountType,
+                            isExpanded: true,
+                            hint: Text(isArabic ? 'اختر نوع الحساب' : 'Select Account Type'),
+                            items: _accountTypes.map((type) {
+                              return DropdownMenuItem(
+                                value: type,
+                                child: Text(type.displayName),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedAccountType = value;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Region Selection
+                      Text(
+                        isArabic ? 'المنطقة' : 'Region',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 8.h),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12.w),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8.r),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedRegion,
+                            isExpanded: true,
+                            items: _regions.map((region) {
+                              return DropdownMenuItem(
+                                value: region,
+                                child: Text(region),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedRegion = value!;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Edition Selection
+                      Text(
+                        isArabic ? 'الإصدار' : 'Edition',
+                        style: TextStyle(
+                          fontSize: 14.sp,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 8.h),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12.w),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8.r),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedEdition,
+                            isExpanded: true,
+                            items: _editions.map((edition) {
+                              return DropdownMenuItem(
+                                value: edition,
+                                child: Text(edition),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              setState(() {
+                                _selectedEdition = value!;
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Email
+                      TextFormField(
+                        controller: _emailController,
+                        decoration: InputDecoration(
+                          labelText: isArabic ? 'البريد الإلكتروني للحساب' : 'Account Email',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.r),
+                          ),
+                          prefixIcon: Icon(Icons.email),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Password
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: isArabic ? 'كلمة المرور' : 'Password',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.r),
+                          ),
+                          prefixIcon: Icon(Icons.lock),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Description
+                      TextFormField(
+                        controller: _descriptionController,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          labelText: isArabic ? 'الوصف' : 'Description',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.r),
+                          ),
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
 
-            // Footer Actions
+            // Action Buttons
             Container(
               padding: EdgeInsets.all(16.w),
               decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: isDarkMode
-                        ? AppTheme.darkSurface
-                        : Colors.grey[300]!,
-                  ),
+                color: isDarkMode ? AppTheme.darkSurface : Colors.grey[50],
+                borderRadius: BorderRadius.vertical(
+                  bottom: Radius.circular(16.r),
                 ),
               ),
               child: Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _isProcessing ? null : () => Navigator.pop(context),
+                      onPressed: _isProcessing
+                          ? null
+                          : () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
                         padding: EdgeInsets.symmetric(vertical: 12.h),
                         shape: RoundedRectangleBorder(
@@ -625,7 +580,9 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                   SizedBox(width: 12.w),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: _isProcessing ? null : _approveGameContribution,
+                      onPressed: _isProcessing
+                          ? null
+                          : _approveGameContribution,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.successColor,
                         padding: EdgeInsets.symmetric(vertical: 12.h),
@@ -635,19 +592,18 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                       ),
                       child: _isProcessing
                           ? SizedBox(
+                        width: 20.w,
                         height: 20.h,
-                        width: 20.h,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                           : Text(
                         isArabic ? 'موافقة' : 'Approve',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(color: Colors.white),
                       ),
                     ),
                   ),
@@ -658,27 +614,5 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
         ),
       ),
     );
-  }
-
-  Color _getTierColor(LenderTier tier) {
-    switch (tier) {
-      case LenderTier.gamesVault:
-        return Colors.green;
-      case LenderTier.member:
-        return AppTheme.primaryColor;
-      case LenderTier.nonMember:
-        return Colors.orange;
-      case LenderTier.admin:
-        return Colors.red;
-    }
-  }
-
-  @override
-  void dispose() {
-    _gameValueController.dispose();
-    _borrowPriceController.dispose();
-    _notesController.dispose();
-    _expiryDaysController.dispose();
-    super.dispose();
   }
 }
