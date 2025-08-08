@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// FIXED ENUMS - Compatible with all Flutter versions
 enum UserTier {
   admin('Admin'),
   vip('VIP Member'),
@@ -10,11 +11,36 @@ enum UserTier {
   final String displayName;
   const UserTier(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case UserTier.admin:
+        return 'admin';
+      case UserTier.vip:
+        return 'vip';
+      case UserTier.member:
+        return 'member';
+      case UserTier.client:
+        return 'client';
+      case UserTier.user:
+        return 'user';
+    }
+  }
+
   static UserTier fromString(String value) {
-    return UserTier.values.firstWhere(
-          (tier) => tier.name == value.toLowerCase(),
-      orElse: () => UserTier.user,
-    );
+    switch (value.toLowerCase()) {
+      case 'admin':
+        return UserTier.admin;
+      case 'vip':
+        return UserTier.vip;
+      case 'member':
+        return UserTier.member;
+      case 'client':
+        return UserTier.client;
+      case 'user':
+      default:
+        return UserTier.user;
+    }
   }
 }
 
@@ -26,11 +52,28 @@ enum Platform {
   final String displayName;
   const Platform(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case Platform.ps4:
+        return 'ps4';
+      case Platform.ps5:
+        return 'ps5';
+      case Platform.na:
+        return 'na';
+    }
+  }
+
   static Platform fromString(String value) {
-    return Platform.values.firstWhere(
-          (platform) => platform.name == value.toLowerCase(),
-      orElse: () => Platform.na,
-    );
+    switch (value.toLowerCase()) {
+      case 'ps4':
+        return Platform.ps4;
+      case 'ps5':
+        return Platform.ps5;
+      case 'na':
+      default:
+        return Platform.na;
+    }
   }
 }
 
@@ -43,11 +86,33 @@ enum UserStatus {
   final String displayName;
   const UserStatus(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case UserStatus.active:
+        return 'active';
+      case UserStatus.inactive:
+        return 'inactive';
+      case UserStatus.suspended:
+        return 'suspended';
+      case UserStatus.pending:
+        return 'pending';
+    }
+  }
+
   static UserStatus fromString(String value) {
-    return UserStatus.values.firstWhere(
-          (status) => status.name == value.toLowerCase(),
-      orElse: () => UserStatus.inactive,
-    );
+    switch (value.toLowerCase()) {
+      case 'active':
+        return UserStatus.active;
+      case 'inactive':
+        return UserStatus.inactive;
+      case 'suspended':
+        return UserStatus.suspended;
+      case 'pending':
+        return UserStatus.pending;
+      default:
+        return UserStatus.inactive;
+    }
   }
 }
 
@@ -339,26 +404,37 @@ class UserModel {
   // Helper method to parse balance expiry dates
   static Map<String, DateTime> _parseBalanceExpiry(dynamic data) {
     if (data == null) return {};
+    if (data is! Map) return {};
+
     Map<String, DateTime> result = {};
-    (data as Map<String, dynamic>).forEach((key, value) {
-      if (value is Timestamp) {
-        result[key] = value.toDate();
-      }
-    });
+    try {
+      (data as Map).forEach((key, value) {
+        if (value is Timestamp) {
+          result[key.toString()] = value.toDate();
+        } else if (value is String) {
+          final date = DateTime.tryParse(value);
+          if (date != null) {
+            result[key.toString()] = date;
+          }
+        }
+      });
+    } catch (e) {
+      print('Error parsing balance expiry: $e');
+    }
     return result;
   }
 
-  // Convert to Firestore document
+  // Convert to Firestore document - FIXED to use .value instead of .name
   Map<String, dynamic> toFirestore() {
     return {
       'memberId': memberId,
       'name': name,
       'email': email,
       'phoneNumber': phoneNumber,
-      'platform': platform.name,
+      'platform': platform.value,  // FIXED: Using .value instead of .name
       'psId': psId,
-      'tier': tier.name,
-      'status': status.name,
+      'tier': tier.value,  // FIXED: Using .value instead of .name
+      'status': status.value,  // FIXED: Using .value instead of .name
       'joinDate': Timestamp.fromDate(joinDate),
       'suspensionDate': suspensionDate != null
           ? Timestamp.fromDate(suspensionDate!)

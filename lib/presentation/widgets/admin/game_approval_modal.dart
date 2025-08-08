@@ -49,18 +49,10 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
   bool _isProcessing = false;
 
   // Platform options
-  final List<GamePlatform> _platforms = [
-    GamePlatform.ps4,
-    GamePlatform.ps5,
-  ];
+  late final List<GamePlatform> _platforms;
 
   // Account type options
-  final List<AccountType> _accountTypes = [
-    AccountType.primary,
-    AccountType.secondary,
-    AccountType.full,
-    AccountType.psPlus,
-  ];
+  late final List<AccountType> _accountTypes;
 
   // Region options
   final List<String> _regions = [
@@ -83,6 +75,20 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
   @override
   void initState() {
     super.initState();
+
+    // Initialize platform and account type lists with unique values
+    _platforms = [
+      GamePlatform.ps4,
+      GamePlatform.ps5,
+    ];
+
+    _accountTypes = [
+      AccountType.primary,
+      AccountType.secondary,
+      AccountType.full,
+      AccountType.psPlus,
+    ];
+
     _initializeFormData();
   }
 
@@ -98,34 +104,52 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
     final platformString = widget.contributionData['platform']?.toString().toLowerCase();
     if (platformString != null) {
       try {
-        _selectedPlatform = GamePlatform.values.firstWhere(
-              (p) => p.name.toLowerCase() == platformString,
-          orElse: () => GamePlatform.ps5,
-        );
+        // Find matching platform
+        for (var platform in _platforms) {
+          if (platform.name.toLowerCase() == platformString ||
+              platform.toString().toLowerCase().contains(platformString)) {
+            _selectedPlatform = platform;
+            break;
+          }
+        }
       } catch (e) {
-        _selectedPlatform = GamePlatform.ps5;
+        print('Error setting platform: $e');
       }
-    } else {
-      _selectedPlatform = GamePlatform.ps5;
+    }
+
+    // If no platform selected, set default
+    if (_selectedPlatform == null && _platforms.isNotEmpty) {
+      _selectedPlatform = _platforms.first;
     }
 
     // Set account type from contribution data
     final accountTypeString = widget.contributionData['accountType']?.toString().toLowerCase();
     if (accountTypeString != null) {
       try {
-        _selectedAccountType = AccountType.values.firstWhere(
-              (a) => a.name.toLowerCase() == accountTypeString,
-          orElse: () => AccountType.primary,
-        );
+        // Find matching account type
+        for (var accountType in _accountTypes) {
+          if (accountType.name.toLowerCase() == accountTypeString ||
+              accountType.toString().toLowerCase().contains(accountTypeString)) {
+            _selectedAccountType = accountType;
+            break;
+          }
+        }
       } catch (e) {
-        _selectedAccountType = AccountType.primary;
+        print('Error setting account type: $e');
       }
-    } else {
-      _selectedAccountType = AccountType.primary;
     }
 
-    _selectedRegion = widget.contributionData['region'] ?? 'Global';
-    _selectedEdition = widget.contributionData['edition'] ?? 'Standard';
+    // If no account type selected, set default
+    if (_selectedAccountType == null && _accountTypes.isNotEmpty) {
+      _selectedAccountType = _accountTypes.first;
+    }
+
+    // Set region and edition with validation
+    final regionValue = widget.contributionData['region'] ?? 'Global';
+    _selectedRegion = _regions.contains(regionValue) ? regionValue : 'Global';
+
+    final editionValue = widget.contributionData['edition'] ?? 'Standard';
+    _selectedEdition = _editions.contains(editionValue) ? editionValue : 'Standard';
   }
 
   @override
@@ -382,19 +406,21 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<GamePlatform>(
-                            value: _selectedPlatform,
+                            value: _platforms.contains(_selectedPlatform) ? _selectedPlatform : null,
                             isExpanded: true,
                             hint: Text(isArabic ? 'اختر المنصة' : 'Select Platform'),
-                            items: _platforms.map((platform) {
-                              return DropdownMenuItem(
+                            items: _platforms.map((GamePlatform platform) {
+                              return DropdownMenuItem<GamePlatform>(
                                 value: platform,
                                 child: Text(platform.displayName),
                               );
                             }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedPlatform = value;
-                              });
+                            onChanged: (GamePlatform? value) {
+                              if (value != null) {
+                                setState(() {
+                                  _selectedPlatform = value;
+                                });
+                              }
                             },
                           ),
                         ),
@@ -418,19 +444,21 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<AccountType>(
-                            value: _selectedAccountType,
+                            value: _accountTypes.contains(_selectedAccountType) ? _selectedAccountType : null,
                             isExpanded: true,
                             hint: Text(isArabic ? 'اختر نوع الحساب' : 'Select Account Type'),
-                            items: _accountTypes.map((type) {
-                              return DropdownMenuItem(
+                            items: _accountTypes.map((AccountType type) {
+                              return DropdownMenuItem<AccountType>(
                                 value: type,
                                 child: Text(type.displayName),
                               );
                             }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedAccountType = value;
-                              });
+                            onChanged: (AccountType? value) {
+                              if (value != null) {
+                                setState(() {
+                                  _selectedAccountType = value;
+                                });
+                              }
                             },
                           ),
                         ),
@@ -454,18 +482,21 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            value: _selectedRegion,
+                            value: _regions.contains(_selectedRegion) ? _selectedRegion : null,
                             isExpanded: true,
-                            items: _regions.map((region) {
-                              return DropdownMenuItem(
+                            hint: Text(isArabic ? 'اختر المنطقة' : 'Select Region'),
+                            items: _regions.map((String region) {
+                              return DropdownMenuItem<String>(
                                 value: region,
                                 child: Text(region),
                               );
                             }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedRegion = value!;
-                              });
+                            onChanged: (String? value) {
+                              if (value != null) {
+                                setState(() {
+                                  _selectedRegion = value;
+                                });
+                              }
                             },
                           ),
                         ),
@@ -489,18 +520,21 @@ class _GameApprovalModalState extends State<GameApprovalModal> {
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            value: _selectedEdition,
+                            value: _editions.contains(_selectedEdition) ? _selectedEdition : null,
                             isExpanded: true,
-                            items: _editions.map((edition) {
-                              return DropdownMenuItem(
+                            hint: Text(isArabic ? 'اختر الإصدار' : 'Select Edition'),
+                            items: _editions.map((String edition) {
+                              return DropdownMenuItem<String>(
                                 value: edition,
                                 child: Text(edition),
                               );
                             }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedEdition = value!;
-                              });
+                            onChanged: (String? value) {
+                              if (value != null) {
+                                setState(() {
+                                  _selectedEdition = value;
+                                });
+                              }
                             },
                           ),
                         ),

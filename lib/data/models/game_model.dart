@@ -1,5 +1,42 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Import Platform from user_model but we'll redefine it here for clarity
+// Or you can import it: import '../user_model.dart' show Platform;
+
+// Redefine Platform here to ensure it has the .value getter
+enum Platform {
+  ps4('PS4'),
+  ps5('PS5'),
+  na('N/A');
+
+  final String displayName;
+  const Platform(this.displayName);
+
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case Platform.ps4:
+        return 'ps4';
+      case Platform.ps5:
+        return 'ps5';
+      case Platform.na:
+        return 'na';
+    }
+  }
+
+  static Platform fromString(String value) {
+    switch (value.toLowerCase()) {
+      case 'ps4':
+        return Platform.ps4;
+      case 'ps5':
+        return Platform.ps5;
+      case 'na':
+      default:
+        return Platform.na;
+    }
+  }
+}
+
 enum AccountType {
   full('Full Account'),
   primary('Primary'),
@@ -9,11 +46,33 @@ enum AccountType {
   final String displayName;
   const AccountType(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case AccountType.full:
+        return 'full';
+      case AccountType.primary:
+        return 'primary';
+      case AccountType.secondary:
+        return 'secondary';
+      case AccountType.psPlus:
+        return 'psPlus';
+    }
+  }
+
   static AccountType fromString(String value) {
-    return AccountType.values.firstWhere(
-          (type) => type.name == value.toLowerCase(),
-      orElse: () => AccountType.primary,
-    );
+    switch (value.toLowerCase()) {
+      case 'full':
+        return AccountType.full;
+      case 'primary':
+        return AccountType.primary;
+      case 'secondary':
+        return AccountType.secondary;
+      case 'psplus':
+        return AccountType.psPlus;
+      default:
+        return AccountType.primary;
+    }
   }
 
   // Get borrow value multiplier
@@ -52,11 +111,32 @@ enum SlotStatus {
   final String displayName;
   const SlotStatus(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case SlotStatus.available:
+        return 'available';
+      case SlotStatus.taken:
+        return 'taken';
+      case SlotStatus.reserved:
+        return 'reserved';
+      case SlotStatus.notAvailable:
+        return 'notAvailable';
+    }
+  }
+
   static SlotStatus fromString(String value) {
-    return SlotStatus.values.firstWhere(
-          (status) => status.name == value.toLowerCase(),
-      orElse: () => SlotStatus.notAvailable,
-    );
+    switch (value.toLowerCase()) {
+      case 'available':
+        return SlotStatus.available;
+      case 'taken':
+        return SlotStatus.taken;
+      case 'reserved':
+        return SlotStatus.reserved;
+      case 'notavailable':
+      default:
+        return SlotStatus.notAvailable;
+    }
   }
 }
 
@@ -69,11 +149,33 @@ enum LenderTier {
   final String displayName;
   const LenderTier(this.displayName);
 
+  // Use this for storing in Firebase instead of .name
+  String get value {
+    switch (this) {
+      case LenderTier.gamesVault:
+        return 'gamesVault';
+      case LenderTier.member:
+        return 'member';
+      case LenderTier.nonMember:
+        return 'nonMember';
+      case LenderTier.admin:
+        return 'admin';
+    }
+  }
+
   static LenderTier fromString(String value) {
-    return LenderTier.values.firstWhere(
-          (tier) => tier.name == value.toLowerCase(),
-      orElse: () => LenderTier.nonMember,
-    );
+    switch (value.toLowerCase()) {
+      case 'gamesvault':
+        return LenderTier.gamesVault;
+      case 'member':
+        return LenderTier.member;
+      case 'nonmember':
+        return LenderTier.nonMember;
+      case 'admin':
+        return LenderTier.admin;
+      default:
+        return LenderTier.nonMember;
+    }
   }
 }
 
@@ -100,9 +202,9 @@ class GameSlot {
 
   Map<String, dynamic> toMap() {
     return {
-      'platform': platform.name,
-      'accountType': accountType.name,
-      'status': status.name,
+      'platform': platform.value,  // FIXED: Using .value instead of .name
+      'accountType': accountType.value,  // FIXED: Using .value instead of .name
+      'status': status.value,  // FIXED: Using .value instead of .name
       'borrowerId': borrowerId,
       'borrowDate': borrowDate != null ? Timestamp.fromDate(borrowDate!) : null,
       'expectedReturnDate': expectedReturnDate != null
@@ -249,9 +351,9 @@ class GameAccount {
   // Calculate profit
   double get profit => totalRevenues - totalCost;
 
-  // Check if available for borrowing
+  // Check if available for borrowing - FIXED
   bool isAvailableForBorrowing(Platform platform, AccountType accountType) {
-    final slotKey = '${platform.name}_${accountType.name}';
+    final slotKey = '${platform.value}_${accountType.value}';  // FIXED: Using .value
     final slot = slots[slotKey];
     return slot != null && slot.status == SlotStatus.available;
   }
@@ -294,15 +396,17 @@ class GameAccount {
       contributorId: data['contributorId'] ?? '',
       contributorName: data['contributorName'] ?? '',
       lenderTier: LenderTier.fromString(data['lenderTier'] ?? 'nonMember'),
-      dateAdded: (data['dateAdded'] as Timestamp).toDate(),
+      dateAdded: data['dateAdded'] != null
+          ? (data['dateAdded'] as Timestamp).toDate()
+          : DateTime.now(),
       dateRemoved: data['dateRemoved'] != null
           ? (data['dateRemoved'] as Timestamp).toDate() : null,
       isActive: data['isActive'] ?? true,
       supportedPlatforms: (data['supportedPlatforms'] as List<dynamic>?)
-          ?.map((e) => Platform.fromString(e))
+          ?.map((e) => Platform.fromString(e.toString()))
           .toList() ?? [],
       sharingOptions: (data['sharingOptions'] as List<dynamic>?)
-          ?.map((e) => AccountType.fromString(e))
+          ?.map((e) => AccountType.fromString(e.toString()))
           .toList() ?? [],
       slots: parsedSlots,
       gameValue: (data['gameValue'] ?? 0).toDouble(),
@@ -321,13 +425,17 @@ class GameAccount {
           ? List<String>.from(data['fundContributors']) : null,
       contributorShares: data['contributorShares'] != null
           ? Map<String, double>.from(data['contributorShares']) : null,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      updatedAt: (data['updatedAt'] as Timestamp).toDate(),
+      createdAt: data['createdAt'] != null
+          ? (data['createdAt'] as Timestamp).toDate()
+          : DateTime.now(),
+      updatedAt: data['updatedAt'] != null
+          ? (data['updatedAt'] as Timestamp).toDate()
+          : DateTime.now(),
       additionalData: data['additionalData'],
     );
   }
 
-  // Convert to Firestore document
+  // Convert to Firestore document - FIXED
   Map<String, dynamic> toFirestore() {
     // Convert slots to map
     Map<String, dynamic> slotsMap = {};
@@ -347,12 +455,12 @@ class GameAccount {
       'expiryDate': expiryDate != null ? Timestamp.fromDate(expiryDate!) : null,
       'contributorId': contributorId,
       'contributorName': contributorName,
-      'lenderTier': lenderTier.name,
+      'lenderTier': lenderTier.value,  // FIXED: Using .value instead of .name
       'dateAdded': Timestamp.fromDate(dateAdded),
       'dateRemoved': dateRemoved != null ? Timestamp.fromDate(dateRemoved!) : null,
       'isActive': isActive,
-      'supportedPlatforms': supportedPlatforms.map((e) => e.name).toList(),
-      'sharingOptions': sharingOptions.map((e) => e.name).toList(),
+      'supportedPlatforms': supportedPlatforms.map((e) => e.value).toList(),  // FIXED
+      'sharingOptions': sharingOptions.map((e) => e.value).toList(),  // FIXED
       'slots': slotsMap,
       'gameValue': gameValue,
       'totalCost': totalCost,
@@ -450,23 +558,6 @@ class GameAccount {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       additionalData: additionalData ?? this.additionalData,
-    );
-  }
-}
-
-// Enum for Platform (imported from user_model.dart)
-enum Platform {
-  ps4('PS4'),
-  ps5('PS5'),
-  na('N/A');
-
-  final String displayName;
-  const Platform(this.displayName);
-
-  static Platform fromString(String value) {
-    return Platform.values.firstWhere(
-          (platform) => platform.name == value.toLowerCase(),
-      orElse: () => Platform.na,
     );
   }
 }

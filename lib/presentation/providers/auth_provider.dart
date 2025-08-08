@@ -202,7 +202,7 @@ class AuthProvider extends ChangeNotifier {
             'email': email,
             'phoneNumber': phoneNumber,
             'platform': 'na',
-            'tier': tier.name,
+            'tier': tier.value,
             'status': tier == UserTier.user ? 'active' : 'pending',
             'joinDate': Timestamp.now(),
             'origin': 'App Registration',
@@ -398,7 +398,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       await _firestore.collection('users').doc(_currentUser!.uid).update({
-        'status': UserStatus.suspended.name,
+        'status': UserStatus.suspended.value,
         'suspensionDate': Timestamp.now(),
         'balance': 0,
         'points': 0,
@@ -495,7 +495,7 @@ class AuthProvider extends ChangeNotifier {
 
       if (name != null) updates['name'] = name;
       if (phoneNumber != null) updates['phoneNumber'] = phoneNumber;
-      if (platform != null) updates['platform'] = platform.name;
+      if (platform != null) updates['platform'] = platform.value;
       if (psId != null) updates['psId'] = psId;
 
       await _firestore
