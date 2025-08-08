@@ -540,7 +540,7 @@ class _UserDashboardState extends State<UserDashboard> {
 
   Color _getTierColor(tier) {
     if (tier == null) return AppTheme.primaryColor;
-    switch (tier.name) {
+    switch (tier.value) {
       case 'admin':
         return Colors.red;
       case 'vip':

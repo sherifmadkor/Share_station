@@ -106,7 +106,7 @@ class AuthProvider extends ChangeNotifier {
 
         return {
           'success': true,
-          'role': _currentUser?.tier.name,
+          'role': _currentUser?.tier.value,
           'user': _currentUser,
         };
       }
@@ -375,7 +375,7 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       await _firestore.collection('users').doc(_currentUser!.uid).update({
-        'tier': UserTier.vip.name,
+        'tier': UserTier.vip.value,
         'borrowLimit': 5,
         'updatedAt': Timestamp.now(),
       });

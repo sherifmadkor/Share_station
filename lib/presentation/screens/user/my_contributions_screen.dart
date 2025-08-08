@@ -8,7 +8,8 @@ import 'package:intl/intl.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../routes/app_routes.dart';
+import '../../../data/models/contribution_model.dart';
+import '../../../services/contribution_service.dart';
 import '../user/add_contribution_screen.dart';
 
 class MyContributionsScreen extends StatefulWidget {
@@ -21,7 +22,7 @@ class MyContributionsScreen extends StatefulWidget {
 class _MyContributionsScreenState extends State<MyContributionsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ContributionService _contributionService = ContributionService();
 
   @override
   void initState() {
@@ -43,6 +44,14 @@ class _MyContributionsScreenState extends State<MyContributionsScreen>
     final isDarkMode = appProvider.isDarkMode;
     final user = authProvider.currentUser;
 
+    if (user == null) {
+      return Scaffold(
+        body: Center(
+          child: Text(isArabic ? 'الرجاء تسجيل الدخول' : 'Please login first'),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: isDarkMode ? AppTheme.darkBackground : AppTheme.lightBackground,
       appBar: AppBar(
@@ -60,19 +69,50 @@ class _MyContributionsScreenState extends State<MyContributionsScreen>
           indicatorColor: Colors.white,
           indicatorWeight: 3,
           tabs: [
-            Tab(text: isArabic ? 'الألعاب' : 'Games'),
-            Tab(text: isArabic ? 'التمويل' : 'Funds'),
+            Tab(text: isArabic ? 'المعتمدة' : 'Approved'),
             Tab(text: isArabic ? 'المعلقة' : 'Pending'),
+            Tab(text: isArabic ? 'المرفوضة' : 'Rejected'),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildGameContributions(user?.uid),
-          _buildFundContributions(user?.uid),
-          _buildPendingContributions(user?.uid),
-        ],
+      body: StreamBuilder<List<ContributionModel>>(
+        stream: _contributionService.getUserContributions(user.uid),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                isArabic ? 'خطأ في تحميل المساهمات' : 'Error loading contributions',
+                style: TextStyle(color: AppTheme.errorColor),
+              ),
+            );
+          }
+
+          final allContributions = snapshot.data ?? [];
+
+          // Filter contributions by status
+          final approvedContributions = allContributions
+              .where((c) => c.status == ContributionStatus.approved)
+              .toList();
+          final pendingContributions = allContributions
+              .where((c) => c.status == ContributionStatus.pending)
+              .toList();
+          final rejectedContributions = allContributions
+              .where((c) => c.status == ContributionStatus.rejected)
+              .toList();
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildContributionList(approvedContributions, ContributionStatus.approved),
+              _buildContributionList(pendingContributions, ContributionStatus.pending),
+              _buildContributionList(rejectedContributions, ContributionStatus.rejected),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
@@ -93,365 +133,271 @@ class _MyContributionsScreenState extends State<MyContributionsScreen>
     );
   }
 
-  Widget _buildGameContributions(String? userId) {
-    if (userId == null) {
-      return Center(child: Text('Please login first'));
-    }
-
+  Widget _buildContributionList(List<ContributionModel> contributions, ContributionStatus status) {
     final appProvider = Provider.of<AppProvider>(context);
     final isArabic = appProvider.isArabic;
     final isDarkMode = appProvider.isDarkMode;
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('games')
-          .where('contributors', arrayContains: {
-        'userId': userId,
-      })
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              isArabic ? 'خطأ في تحميل المساهمات' : 'Error loading contributions',
-              style: TextStyle(color: AppTheme.errorColor),
-            ),
-          );
-        }
-
-        final games = snapshot.data?.docs ?? [];
-
-        if (games.isEmpty) {
-          return _buildEmptyState(
-            icon: FontAwesomeIcons.gamepad,
-            title: isArabic ? 'لا توجد مساهمات ألعاب' : 'No game contributions',
-            subtitle: isArabic
-                ? 'ابدأ بالمساهمة بلعبة لزيادة حد المحطة'
-                : 'Start contributing games to increase your Station Limit',
-          );
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(16.w),
-          itemCount: games.length,
-          itemBuilder: (context, index) {
-            final data = games[index].data() as Map<String, dynamic>;
-
-            return Card(
-              margin: EdgeInsets.only(bottom: 12.h),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.r),
-              ),
-              child: Padding(
-                padding: EdgeInsets.all(16.w),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            data['title'] ?? 'Unknown Game',
-                            style: TextStyle(
-                              fontSize: 18.sp,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12.w,
-                            vertical: 4.h,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.successColor.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8.r),
-                          ),
-                          child: Text(
-                            isArabic ? 'نشط' : 'Active',
-                            style: TextStyle(
-                              color: AppTheme.successColor,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12.sp,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 12.h),
-                    _buildInfoRow(
-                      icon: Icons.devices,
-                      label: isArabic ? 'المنصات' : 'Platforms',
-                      value: (data['supportedPlatforms'] as List?)
-                          ?.map((p) => p.toString().toUpperCase())
-                          .join(', ') ?? 'N/A',
-                    ),
-                    _buildInfoRow(
-                      icon: Icons.attach_money,
-                      label: isArabic ? 'قيمة اللعبة' : 'Game Value',
-                      value: '${data['gameValue']?.toStringAsFixed(0) ?? '0'} LE',
-                    ),
-                    _buildInfoRow(
-                      icon: Icons.people,
-                      label: isArabic ? 'إجمالي الاستعارات' : 'Total Borrows',
-                      value: '${data['totalBorrows'] ?? 0}',
-                    ),
-                    _buildInfoRow(
-                      icon: Icons.trending_up,
-                      label: isArabic ? 'الإيرادات المكتسبة' : 'Revenue Earned',
-                      value: '${data['borrowRevenue']?.toStringAsFixed(0) ?? '0'} LE',
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildFundContributions(String? userId) {
-    if (userId == null) {
-      return Center(child: Text('Please login first'));
+    if (contributions.isEmpty) {
+      return _buildEmptyState(
+        icon: _getStatusIcon(status),
+        title: _getEmptyTitle(status, isArabic),
+        subtitle: _getEmptySubtitle(status, isArabic),
+      );
     }
 
-    final appProvider = Provider.of<AppProvider>(context);
-    final isArabic = appProvider.isArabic;
+    return ListView.builder(
+      padding: EdgeInsets.all(16.w),
+      itemCount: contributions.length,
+      itemBuilder: (context, index) {
+        final contribution = contributions[index];
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('fund_contributions')
-          .where('contributorId', isEqualTo: userId)
-          .where('status', isEqualTo: 'approved')
-          .orderBy('approvedAt', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              isArabic ? 'خطأ في تحميل المساهمات' : 'Error loading contributions',
-              style: TextStyle(color: AppTheme.errorColor),
-            ),
-          );
-        }
-
-        final funds = snapshot.data?.docs ?? [];
-
-        if (funds.isEmpty) {
-          return _buildEmptyState(
-            icon: FontAwesomeIcons.dollarSign,
-            title: isArabic ? 'لا توجد مساهمات مالية' : 'No fund contributions',
-            subtitle: isArabic
-                ? 'ساهم في شراء ألعاب جديدة للمكتبة'
-                : 'Contribute to purchasing new games for the library',
-          );
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(16.w),
-          itemCount: funds.length,
-          itemBuilder: (context, index) {
-            final data = funds[index].data() as Map<String, dynamic>;
-            final approvedAt = (data['approvedAt'] as Timestamp?)?.toDate();
-
-            return Card(
-              margin: EdgeInsets.only(bottom: 12.h),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.r),
-              ),
-              child: Padding(
-                padding: EdgeInsets.all(16.w),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        return Card(
+          margin: EdgeInsets.only(bottom: 12.h),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12.r),
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(16.w),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Icon(
+                      contribution.type == ContributionType.game
+                          ? FontAwesomeIcons.gamepad
+                          : FontAwesomeIcons.dollarSign,
+                      size: 20.sp,
+                      color: AppTheme.primaryColor,
+                    ),
+                    SizedBox(width: 8.w),
+                    Expanded(
+                      child: Text(
+                        contribution.gameTitle ?? contribution.targetGameTitle ?? 'Contribution',
+                        style: TextStyle(
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    _buildStatusBadge(contribution.status, isArabic),
+                  ],
+                ),
+                SizedBox(height: 12.h),
+
+                // Contribution Details
+                if (contribution.type == ContributionType.game) ...[
+                  _buildInfoRow(
+                    icon: Icons.devices,
+                    label: isArabic ? 'المنصة' : 'Platform',
+                    value: contribution.platform?.toUpperCase() ?? 'N/A',
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.category,
+                    label: isArabic ? 'نوع الحساب' : 'Account Type',
+                    value: contribution.accountType ?? 'N/A',
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.attach_money,
+                    label: isArabic ? 'قيمة اللعبة' : 'Game Value',
+                    value: '${contribution.gameValue?.toStringAsFixed(0) ?? '0'} LE',
+                  ),
+                ] else ...[
+                  _buildInfoRow(
+                    icon: Icons.attach_money,
+                    label: isArabic ? 'المبلغ' : 'Amount',
+                    value: '${contribution.fundAmount?.toStringAsFixed(0) ?? '0'} LE',
+                  ),
+                  _buildInfoRow(
+                    icon: Icons.payment,
+                    label: isArabic ? 'طريقة الدفع' : 'Payment Method',
+                    value: contribution.paymentMethod ?? 'N/A',
+                  ),
+                ],
+
+                // Status-specific information
+                if (contribution.status == ContributionStatus.approved) ...[
+                  SizedBox(height: 8.h),
+                  Container(
+                    padding: EdgeInsets.all(8.w),
+                    decoration: BoxDecoration(
+                      color: AppTheme.successColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8.r),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          data['gameTitle'] ?? 'Fund Contribution',
+                          isArabic ? 'التأثير على حسابك:' : 'Impact on your account:',
                           style: TextStyle(
-                            fontSize: 18.sp,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          '${data['amount']?.toStringAsFixed(0) ?? '0'} LE',
-                          style: TextStyle(
-                            fontSize: 18.sp,
+                            fontSize: 12.sp,
                             fontWeight: FontWeight.bold,
                             color: AppTheme.successColor,
                           ),
                         ),
+                        SizedBox(height: 4.h),
+                        if (contribution.type == ContributionType.game) ...[
+                          Text(
+                            isArabic
+                                ? '• حد المحطة: +${contribution.gameValue?.toStringAsFixed(0) ?? '0'} LE'
+                                : '• Station Limit: +${contribution.gameValue?.toStringAsFixed(0) ?? '0'} LE',
+                            style: TextStyle(fontSize: 11.sp),
+                          ),
+                          Text(
+                            isArabic
+                                ? '• الرصيد: +${((contribution.gameValue ?? 0) * 0.7).toStringAsFixed(0)} LE'
+                                : '• Balance: +${((contribution.gameValue ?? 0) * 0.7).toStringAsFixed(0)} LE',
+                            style: TextStyle(fontSize: 11.sp),
+                          ),
+                          Text(
+                            isArabic
+                                ? '• حصص الألعاب: +1'
+                                : '• Game Shares: +1',
+                            style: TextStyle(fontSize: 11.sp),
+                          ),
+                        ] else ...[
+                          Text(
+                            isArabic
+                                ? '• حصص التمويل: +${((contribution.fundAmount ?? 0) / 100).round()}'
+                                : '• Fund Shares: +${((contribution.fundAmount ?? 0) / 100).round()}',
+                            style: TextStyle(fontSize: 11.sp),
+                          ),
+                        ],
                       ],
                     ),
-                    SizedBox(height: 12.h),
-                    _buildInfoRow(
-                      icon: Icons.payment,
-                      label: isArabic ? 'طريقة الدفع' : 'Payment Method',
-                      value: data['paymentMethod'] ?? 'Unknown',
+                  ),
+                ],
+
+                if (contribution.status == ContributionStatus.rejected &&
+                    contribution.rejectionReason != null) ...[
+                  SizedBox(height: 8.h),
+                  Container(
+                    padding: EdgeInsets.all(8.w),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8.r),
                     ),
-                    if (approvedAt != null)
-                      _buildInfoRow(
-                        icon: Icons.calendar_today,
-                        label: isArabic ? 'تاريخ الموافقة' : 'Approved Date',
-                        value: DateFormat('dd MMM yyyy').format(approvedAt),
-                      ),
-                  ],
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16.sp,
+                          color: AppTheme.errorColor,
+                        ),
+                        SizedBox(width: 8.w),
+                        Expanded(
+                          child: Text(
+                            contribution.rejectionReason!,
+                            style: TextStyle(
+                              fontSize: 12.sp,
+                              color: AppTheme.errorColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Dates
+                SizedBox(height: 8.h),
+                _buildInfoRow(
+                  icon: Icons.calendar_today,
+                  label: isArabic ? 'تاريخ الإرسال' : 'Submitted',
+                  value: DateFormat('dd MMM yyyy').format(contribution.createdAt),
                 ),
-              ),
-            );
-          },
+                if (contribution.approvedAt != null)
+                  _buildInfoRow(
+                    icon: Icons.check_circle,
+                    label: isArabic ? 'تاريخ الموافقة' : 'Approved',
+                    value: DateFormat('dd MMM yyyy').format(contribution.approvedAt!),
+                  ),
+              ],
+            ),
+          ),
         );
       },
     );
   }
 
-  Widget _buildPendingContributions(String? userId) {
-    if (userId == null) {
-      return Center(child: Text('Please login first'));
+  Widget _buildStatusBadge(ContributionStatus status, bool isArabic) {
+    Color color;
+    String text;
+
+    switch (status) {
+      case ContributionStatus.approved:
+        color = AppTheme.successColor;
+        text = isArabic ? 'معتمد' : 'Approved';
+        break;
+      case ContributionStatus.pending:
+        color = AppTheme.warningColor;
+        text = isArabic ? 'معلق' : 'Pending';
+        break;
+      case ContributionStatus.rejected:
+        color = AppTheme.errorColor;
+        text = isArabic ? 'مرفوض' : 'Rejected';
+        break;
     }
 
-    final appProvider = Provider.of<AppProvider>(context);
-    final isArabic = appProvider.isArabic;
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore
-          .collection('contribution_requests')
-          .where('contributorId', isEqualTo: userId)
-          .where('status', isEqualTo: 'pending')
-          .orderBy('createdAt', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
-        }
-
-        final gameRequests = snapshot.data?.docs ?? [];
-
-        // Also get fund contribution requests
-        return StreamBuilder<QuerySnapshot>(
-          stream: _firestore
-              .collection('fund_contribution_requests')
-              .where('contributorId', isEqualTo: userId)
-              .where('status', isEqualTo: 'pending')
-              .orderBy('createdAt', descending: true)
-              .snapshots(),
-          builder: (context, fundSnapshot) {
-            if (fundSnapshot.connectionState == ConnectionState.waiting) {
-              return Center(child: CircularProgressIndicator());
-            }
-
-            final fundRequests = fundSnapshot.data?.docs ?? [];
-            final allPending = [...gameRequests, ...fundRequests];
-
-            if (allPending.isEmpty) {
-              return _buildEmptyState(
-                icon: FontAwesomeIcons.clock,
-                title: isArabic ? 'لا توجد طلبات معلقة' : 'No pending requests',
-                subtitle: isArabic
-                    ? 'جميع مساهماتك تمت الموافقة عليها'
-                    : 'All your contributions have been approved',
-              );
-            }
-
-            return ListView.builder(
-              padding: EdgeInsets.all(16.w),
-              itemCount: allPending.length,
-              itemBuilder: (context, index) {
-                final doc = allPending[index];
-                final data = doc.data() as Map<String, dynamic>;
-                final isGameRequest = doc.reference.parent.id == 'contribution_requests';
-                final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-
-                return Card(
-                  margin: EdgeInsets.only(bottom: 12.h),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12.r),
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.all(16.w),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              isGameRequest
-                                  ? FontAwesomeIcons.gamepad
-                                  : FontAwesomeIcons.dollarSign,
-                              size: 20.sp,
-                              color: AppTheme.primaryColor,
-                            ),
-                            SizedBox(width: 8.w),
-                            Expanded(
-                              child: Text(
-                                data['gameTitle'] ?? 'Contribution Request',
-                                style: TextStyle(
-                                  fontSize: 18.sp,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 12.w,
-                                vertical: 4.h,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.warningColor.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(8.r),
-                              ),
-                              child: Text(
-                                isArabic ? 'معلق' : 'Pending',
-                                style: TextStyle(
-                                  color: AppTheme.warningColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12.sp,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 12.h),
-                        _buildInfoRow(
-                          icon: Icons.category,
-                          label: isArabic ? 'النوع' : 'Type',
-                          value: isGameRequest
-                              ? (data['accountType'] ?? 'Game')
-                              : (isArabic ? 'مساهمة مالية' : 'Fund Contribution'),
-                        ),
-                        if (!isGameRequest)
-                          _buildInfoRow(
-                            icon: Icons.attach_money,
-                            label: isArabic ? 'المبلغ' : 'Amount',
-                            value: '${data['amount']?.toStringAsFixed(0) ?? '0'} LE',
-                          ),
-                        if (createdAt != null)
-                          _buildInfoRow(
-                            icon: Icons.access_time,
-                            label: isArabic ? 'تاريخ الطلب' : 'Request Date',
-                            value: DateFormat('dd MMM yyyy, HH:mm').format(createdAt),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: 12.w,
+        vertical: 4.h,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(8.r),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+          fontSize: 12.sp,
+        ),
+      ),
     );
+  }
+
+  IconData _getStatusIcon(ContributionStatus status) {
+    switch (status) {
+      case ContributionStatus.approved:
+        return FontAwesomeIcons.checkCircle;
+      case ContributionStatus.pending:
+        return FontAwesomeIcons.clock;
+      case ContributionStatus.rejected:
+        return FontAwesomeIcons.timesCircle;
+    }
+  }
+
+  String _getEmptyTitle(ContributionStatus status, bool isArabic) {
+    switch (status) {
+      case ContributionStatus.approved:
+        return isArabic ? 'لا توجد مساهمات معتمدة' : 'No approved contributions';
+      case ContributionStatus.pending:
+        return isArabic ? 'لا توجد مساهمات معلقة' : 'No pending contributions';
+      case ContributionStatus.rejected:
+        return isArabic ? 'لا توجد مساهمات مرفوضة' : 'No rejected contributions';
+    }
+  }
+
+  String _getEmptySubtitle(ContributionStatus status, bool isArabic) {
+    switch (status) {
+      case ContributionStatus.approved:
+        return isArabic
+            ? 'ساهم بالألعاب أو التمويل لتحسين مكانتك'
+            : 'Contribute games or funds to improve your standing';
+      case ContributionStatus.pending:
+        return isArabic
+            ? 'لا توجد مساهمات في انتظار الموافقة'
+            : 'No contributions awaiting approval';
+      case ContributionStatus.rejected:
+        return isArabic
+            ? 'لا توجد مساهمات مرفوضة'
+            : 'No rejected contributions';
+    }
   }
 
   Widget _buildEmptyState({
