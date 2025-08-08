@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:share_station/presentation/screens/admin/admin_approval_dashboard.dart';
 
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
@@ -201,6 +202,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   icon: FontAwesomeIcons.clock,
                   color: AppTheme.warningColor,
                   isDarkMode: isDarkMode,
+                  // ADD THE NAVIGATION LOGIC HERE AS WELL
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AdminApprovalDashboard(),
+                      ),
+                    );
+                  },
                 ),
                 _buildStatCard(
                   title: isArabic ? 'الإيرادات' : 'Revenue',
@@ -257,7 +267,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
               icon: FontAwesomeIcons.userCheck,
               color: AppTheme.warningColor,
               onTap: () {
-                // Navigate to pending approvals
+                // ADD YOUR NAVIGATION CODE HERE
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const AdminApprovalDashboard(), // Assuming you have this screen created
+                  ),
+                );
               },
             ),
 
@@ -296,47 +312,53 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required IconData icon,
     required Color color,
     required bool isDarkMode,
+    VoidCallback? onTap, // ADD THIS LINE
   }) {
-    return Container(
-      padding: EdgeInsets.all(16.w),
-      decoration: BoxDecoration(
-        color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-        borderRadius: BorderRadius.circular(12.r),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            color: color,
-            size: 28.sp,
-          ),
-          SizedBox(height: 8.h),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20.sp,
-              fontWeight: FontWeight.bold,
+    return InkWell( // WRAP WITH INKWELL
+      onTap: onTap, // USE THE CALLBACK HERE
+      borderRadius: BorderRadius.circular(12.r),
+      child: Container(
+        padding: EdgeInsets.all(16.w),
+        decoration: BoxDecoration(
+          color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(12.r),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: Offset(0, 2),
             ),
-          ),
-          SizedBox(height: 2.h), // FIXED: Reduced spacing from 4.h
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12.sp,
-              color: isDarkMode
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: color,
+              size: 28.sp,
             ),
-          ),
-        ],
+            SizedBox(height: 8.h),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20.sp,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 2.h),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12.sp,
+                color: isDarkMode
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
+              ),
+              textAlign: TextAlign.center, // Added for better text wrapping
+            ),
+          ],
+        ),
       ),
     );
   }

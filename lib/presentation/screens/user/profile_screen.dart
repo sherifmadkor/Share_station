@@ -7,16 +7,11 @@ import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/user_model.dart';
-import '../../../routes/app_routes.dart';
+import '../user/add_contribution_screen.dart';
 
-class ProfileScreen extends StatefulWidget {
+class ProfileScreen extends StatelessWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
-  @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
-}
-
-class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final appProvider = Provider.of<AppProvider>(context);
@@ -26,125 +21,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = authProvider.currentUser;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          isArabic ? 'الملف الشخصي' : 'Profile',
-          style: TextStyle(
-            fontSize: 20.sp,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.edit),
-            onPressed: () {
-              // Navigate to edit profile
-            },
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Profile Header
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(24.w),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppTheme.primaryColor,
-                    AppTheme.secondaryColor,
-                  ],
+      body: CustomScrollView(
+        slivers: [
+          // Profile Header
+          SliverAppBar(
+            expandedHeight: 250.h,
+            pinned: true,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryColor,
+                      AppTheme.primaryColor.withOpacity(0.7),
+                    ],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Profile Picture
+                      CircleAvatar(
+                        radius: 50.r,
+                        backgroundColor: Colors.white,
+                        child: Icon(
+                          Icons.person,
+                          size: 60.sp,
+                          color: AppTheme.primaryColor,
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+                      // User Name
+                      Text(
+                        user?.name ?? 'User',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 4.h),
+                      // Member ID and Tier
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12.w,
+                          vertical: 4.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20.r),
+                        ),
+                        child: Text(
+                          'ID: ${user?.memberId ?? '000'} • ${_getTierText(user?.tier, isArabic)}',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.sp,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              child: Column(
-                children: [
-                  // Avatar
-                  Container(
-                    width: 100.w,
-                    height: 100.h,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      FontAwesomeIcons.user,
-                      size: 50.sp,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                  SizedBox(height: 16.h),
-                  // Name
-                  Text(
-                    user?.name ?? 'User',
-                    style: TextStyle(
-                      fontSize: 24.sp,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 8.h),
-                  // Member ID & Tier
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 16.w,
-                      vertical: 6.h,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(20.r),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'ID: ${user?.memberId ?? 'N/A'}',
-                          style: TextStyle(
-                            fontSize: 14.sp,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(width: 12.w),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8.w,
-                            vertical: 2.h,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getTierColor(user?.tier),
-                            borderRadius: BorderRadius.circular(10.r),
-                          ),
-                          child: Text(
-                            user?.tier.displayName ?? 'User',
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
             ),
+          ),
 
-            // Stats Section
-            Container(
+          // Profile Content
+          SliverToBoxAdapter(
+            child: Padding(
               padding: EdgeInsets.all(16.w),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Statistics Section
                   Text(
                     isArabic ? 'الإحصائيات' : 'Statistics',
                     style: TextStyle(
@@ -152,14 +104,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  SizedBox(height: 16.h),
+                  SizedBox(height: 12.h),
                   Row(
                     children: [
                       Expanded(
                         child: _buildStatCard(
-                          icon: FontAwesomeIcons.coins,
+                          icon: Icons.account_balance_wallet,
                           label: isArabic ? 'الرصيد' : 'Balance',
-                          value: '${user?.totalBalance.toStringAsFixed(2) ?? '0.00'} LE',
+                          value: '${user?.totalBalance.toStringAsFixed(0) ?? '0'} LE',
                           color: AppTheme.successColor,
                           isDarkMode: isDarkMode,
                         ),
@@ -167,7 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       SizedBox(width: 12.w),
                       Expanded(
                         child: _buildStatCard(
-                          icon: FontAwesomeIcons.star,
+                          icon: Icons.stars,
                           label: isArabic ? 'النقاط' : 'Points',
                           value: '${user?.points ?? 0}',
                           color: AppTheme.warningColor,
@@ -181,9 +133,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     children: [
                       Expanded(
                         child: _buildStatCard(
-                          icon: FontAwesomeIcons.handHoldingDollar,
-                          label: isArabic ? 'المساهمات' : 'Contributions',
-                          value: '${user?.totalShares ?? 0}',
+                          icon: Icons.trending_up,
+                          label: isArabic ? 'حد المحطة' : 'Station Limit',
+                          value: '${user?.stationLimit ?? 0}',
                           color: AppTheme.primaryColor,
                           isDarkMode: isDarkMode,
                         ),
@@ -191,132 +143,178 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       SizedBox(width: 12.w),
                       Expanded(
                         child: _buildStatCard(
-                          icon: FontAwesomeIcons.gamepad,
-                          label: isArabic ? 'الاستعارات' : 'Borrows',
-                          value: '${user?.currentBorrows ?? 0}/${user?.borrowLimit ?? 1}',
+                          icon: Icons.gamepad,
+                          label: isArabic ? 'المساهمات' : 'Contributions',
+                          value: '${user?.totalShares ?? 0}',
                           color: AppTheme.infoColor,
                           isDarkMode: isDarkMode,
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
 
-            // Menu Items
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 16.w),
-              child: Column(
-                children: [
-                  _buildMenuItem(
-                    icon: FontAwesomeIcons.userPen,
-                    title: isArabic ? 'تعديل الملف الشخصي' : 'Edit Profile',
+                  SizedBox(height: 24.h),
+
+                  // Quick Actions Section
+                  Text(
+                    isArabic ? 'الإجراءات السريعة' : 'Quick Actions',
+                    style: TextStyle(
+                      fontSize: 18.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 12.h),
+
+                  // Add Contribution Button
+                  _buildActionButton(
+                    icon: FontAwesomeIcons.plus,
+                    title: isArabic ? 'إضافة مساهمة' : 'Add Contribution',
+                    subtitle: isArabic
+                        ? 'ساهم بلعبة أو مبلغ مالي'
+                        : 'Contribute a game or fund',
+                    color: AppTheme.successColor,
                     onTap: () {
-                      // Navigate to edit profile
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AddContributionScreen(),
+                        ),
+                      );
                     },
+                    isDarkMode: isDarkMode,
+                  ),
+
+                  SizedBox(height: 12.h),
+
+                  // Menu Items
+                  Text(
+                    isArabic ? 'الإعدادات' : 'Settings',
+                    style: TextStyle(
+                      fontSize: 18.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 12.h),
+
+                  _buildMenuItem(
+                    icon: Icons.person_outline,
+                    title: isArabic ? 'معلومات الحساب' : 'Account Information',
+                    onTap: () {
+                      // Navigate to account info
+                    },
+                    isDarkMode: isDarkMode,
                   ),
                   _buildMenuItem(
-                    icon: FontAwesomeIcons.clockRotateLeft,
+                    icon: Icons.history,
                     title: isArabic ? 'سجل المعاملات' : 'Transaction History',
                     onTap: () {
                       // Navigate to transaction history
                     },
+                    isDarkMode: isDarkMode,
                   ),
                   _buildMenuItem(
-                    icon: FontAwesomeIcons.userGroup,
-                    title: isArabic ? 'الإحالات' : 'Referrals',
-                    subtitle: isArabic
-                        ? '${user?.referredUsers.length ?? 0} إحالة'
-                        : '${user?.referredUsers.length ?? 0} referrals',
+                    icon: Icons.card_giftcard,
+                    title: isArabic ? 'المكافآت والإحالات' : 'Rewards & Referrals',
                     onTap: () {
-                      // Navigate to referrals
+                      // Navigate to rewards
                     },
+                    isDarkMode: isDarkMode,
                   ),
                   _buildMenuItem(
-                    icon: FontAwesomeIcons.gear,
-                    title: isArabic ? 'الإعدادات' : 'Settings',
+                    icon: Icons.notifications_outlined,
+                    title: isArabic ? 'الإشعارات' : 'Notifications',
                     onTap: () {
-                      // Navigate to settings
+                      // Navigate to notifications
                     },
+                    isDarkMode: isDarkMode,
                   ),
                   _buildMenuItem(
-                    icon: FontAwesomeIcons.circleQuestion,
+                    icon: Icons.language,
+                    title: isArabic ? 'اللغة' : 'Language',
+                    trailing: Text(
+                      isArabic ? 'العربية' : 'English',
+                      style: TextStyle(
+                        color: AppTheme.primaryColor,
+                        fontSize: 14.sp,
+                      ),
+                    ),
+                    onTap: () {
+                      appProvider.toggleLanguage();
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _buildMenuItem(
+                    icon: isDarkMode ? Icons.light_mode : Icons.dark_mode,
+                    title: isArabic ? 'المظهر' : 'Theme',
+                    trailing: Switch(
+                      value: isDarkMode,
+                      onChanged: (value) {
+                        appProvider.toggleTheme();
+                      },
+                      activeColor: AppTheme.primaryColor,
+                    ),
+                    onTap: () {
+                      appProvider.toggleTheme();
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _buildMenuItem(
+                    icon: Icons.help_outline,
                     title: isArabic ? 'المساعدة والدعم' : 'Help & Support',
                     onTap: () {
                       // Navigate to help
                     },
+                    isDarkMode: isDarkMode,
                   ),
                   _buildMenuItem(
-                    icon: FontAwesomeIcons.shield,
-                    title: isArabic ? 'الشروط والأحكام' : 'Terms & Conditions',
+                    icon: Icons.info_outline,
+                    title: isArabic ? 'حول التطبيق' : 'About App',
                     onTap: () {
-                      // Navigate to terms
+                      // Navigate to about
                     },
+                    isDarkMode: isDarkMode,
                   ),
-                  SizedBox(height: 16.h),
-                  // Logout Button
-                  Container(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        // Show confirmation dialog
-                        final shouldLogout = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text(
-                              isArabic ? 'تسجيل الخروج' : 'Logout',
-                            ),
-                            content: Text(
-                              isArabic
-                                  ? 'هل أنت متأكد من تسجيل الخروج؟'
-                                  : 'Are you sure you want to logout?',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: Text(isArabic ? 'إلغاء' : 'Cancel'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.errorColor,
-                                ),
-                                child: Text(isArabic ? 'خروج' : 'Logout'),
-                              ),
-                            ],
-                          ),
-                        );
 
-                        if (shouldLogout == true) {
-                          await authProvider.signOut();
-                          Navigator.pushNamedAndRemoveUntil(
-                            context,
-                            AppRoutes.login,
-                                (route) => false,
-                          );
-                        }
+                  SizedBox(height: 24.h),
+
+                  // Logout Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56.h,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        _showLogoutDialog(context, isArabic);
                       },
-                      icon: Icon(FontAwesomeIcons.rightFromBracket),
-                      label: Text(
-                        isArabic ? 'تسجيل الخروج' : 'Logout',
-                        style: TextStyle(fontSize: 16.sp),
-                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.errorColor,
-                        padding: EdgeInsets.symmetric(vertical: 14.h),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12.r),
+                          borderRadius: BorderRadius.circular(16.r),
                         ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.logout, color: Colors.white),
+                          SizedBox(width: 8.w),
+                          Text(
+                            isArabic ? 'تسجيل الخروج' : 'Logout',
+                            style: TextStyle(
+                              fontSize: 18.sp,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+
                   SizedBox(height: 32.h),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -331,29 +329,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: EdgeInsets.all(16.w),
       decoration: BoxDecoration(
-        color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-        borderRadius: BorderRadius.circular(12.r),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-        ],
+        color: isDarkMode
+            ? color.withOpacity(0.2)
+            : color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16.r),
+        border: Border.all(
+          color: color.withOpacity(0.3),
+        ),
       ),
       child: Column(
         children: [
           Icon(
             icon,
             color: color,
-            size: 24.sp,
+            size: 28.sp,
           ),
           SizedBox(height: 8.h),
           Text(
             value,
             style: TextStyle(
-              fontSize: 18.sp,
+              fontSize: 20.sp,
               fontWeight: FontWeight.bold,
+              color: color,
             ),
           ),
           SizedBox(height: 4.h),
@@ -371,56 +368,115 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildActionButton({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+    required bool isDarkMode,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16.r),
+      child: Container(
+        padding: EdgeInsets.all(16.w),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              color,
+              color.withOpacity(0.8),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16.r),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12.r),
+              ),
+              child: Icon(
+                icon,
+                color: Colors.white,
+                size: 24.sp,
+              ),
+            ),
+            SizedBox(width: 16.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 4.h),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.sp,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white,
+              size: 20.sp,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMenuItem({
     required IconData icon,
     required String title,
-    String? subtitle,
+    Widget? trailing,
     required VoidCallback onTap,
+    required bool isDarkMode,
   }) {
-    final isDarkMode = Provider.of<AppProvider>(context, listen: false).isDarkMode;
-
     return Container(
       margin: EdgeInsets.only(bottom: 8.h),
+      decoration: BoxDecoration(
+        color: isDarkMode
+            ? AppTheme.darkSurface
+            : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12.r),
+      ),
       child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          padding: EdgeInsets.all(8.w),
-          decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8.r),
-          ),
-          child: Icon(
-            icon,
-            color: AppTheme.primaryColor,
-            size: 20.sp,
-          ),
+        leading: Icon(
+          icon,
+          color: AppTheme.primaryColor,
         ),
         title: Text(
           title,
           style: TextStyle(
             fontSize: 16.sp,
-            fontWeight: FontWeight.w500,
           ),
         ),
-        subtitle: subtitle != null
-            ? Text(
-          subtitle,
-          style: TextStyle(
-            fontSize: 12.sp,
-            color: isDarkMode
-                ? AppTheme.darkTextSecondary
-                : AppTheme.lightTextSecondary,
-          ),
-        )
-            : null,
-        trailing: Icon(
-          Icons.arrow_forward_ios,
-          size: 16.sp,
-          color: isDarkMode
-              ? AppTheme.darkTextSecondary
-              : AppTheme.lightTextSecondary,
+        trailing: trailing ?? Icon(
+          Icons.chevron_right,
+          color: Colors.grey,
         ),
-        tileColor: isDarkMode ? AppTheme.darkSurface : Colors.white,
+        onTap: onTap,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12.r),
         ),
@@ -428,18 +484,86 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Color _getTierColor(UserTier? tier) {
+  String _getTierText(UserTier? tier, bool isArabic) {
+    if (tier == null) return '';
+
     switch (tier) {
       case UserTier.admin:
-        return AppTheme.adminColor;
+        return isArabic ? 'مدير' : 'Admin';
       case UserTier.vip:
-        return AppTheme.vipColor;
+        return isArabic ? 'VIP' : 'VIP';
       case UserTier.member:
-        return AppTheme.memberColor;
+        return isArabic ? 'عضو' : 'Member';
       case UserTier.client:
-        return AppTheme.clientColor;
-      default:
-        return AppTheme.userColor;
+        return isArabic ? 'عميل' : 'Client';
+      case UserTier.user:
+        return isArabic ? 'مستخدم' : 'User';
     }
+  }
+
+  void _showLogoutDialog(BuildContext context, bool isArabic) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.r),
+          ),
+          title: Text(
+            isArabic ? 'تسجيل الخروج' : 'Logout',
+            style: TextStyle(
+              fontSize: 20.sp,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            isArabic
+                ? 'هل أنت متأكد أنك تريد تسجيل الخروج؟'
+                : 'Are you sure you want to logout?',
+            style: TextStyle(fontSize: 16.sp),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                isArabic ? 'إلغاء' : 'Cancel',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 16.sp,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final authProvider = Provider.of<AuthProvider>(
+                  context,
+                  listen: false,
+                );
+                await authProvider.signOut();
+                Navigator.of(context).pushNamedAndRemoveUntil(
+                  '/login',
+                      (route) => false,
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.errorColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8.r),
+                ),
+              ),
+              child: Text(
+                isArabic ? 'تسجيل الخروج' : 'Logout',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16.sp,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }

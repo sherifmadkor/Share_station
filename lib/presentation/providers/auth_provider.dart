@@ -48,12 +48,14 @@ class AuthProvider extends ChangeNotifier {
         _currentUser = UserModel.fromFirestore(doc);
 
         // Check for automatic VIP promotion
-        if (_currentUser!.isEligibleForVIP && _currentUser!.tier == UserTier.member) {
+        if (_currentUser!.isEligibleForVIP &&
+            _currentUser!.tier == UserTier.member) {
           await _promoteToVIP();
         }
 
         // Check for suspension
-        if (_currentUser!.shouldBeSuspended && _currentUser!.status != UserStatus.suspended) {
+        if (_currentUser!.shouldBeSuspended &&
+            _currentUser!.status != UserStatus.suspended) {
           await _suspendUser();
         }
       }
@@ -66,9 +68,7 @@ class AuthProvider extends ChangeNotifier {
 
   // Sign in with email and password
   Future<Map<String, dynamic>> signInWithEmailAndPassword(
-      String email,
-      String password,
-      ) async {
+      String email, String password) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -87,7 +87,8 @@ class AuthProvider extends ChangeNotifier {
           await _auth.signOut();
           return {
             'success': false,
-            'message': 'Your account has been suspended due to inactivity. Please contact support.',
+            'message':
+            'Your account has been suspended due to inactivity. Please contact support.',
           };
         }
 
@@ -95,7 +96,8 @@ class AuthProvider extends ChangeNotifier {
           await _auth.signOut();
           return {
             'success': false,
-            'message': 'Your account is pending approval. Please wait for admin verification.',
+            'message':
+            'Your account is pending approval. Please wait for admin verification.',
           };
         }
 
@@ -130,7 +132,8 @@ class AuthProvider extends ChangeNotifier {
           message = 'This account has been disabled.';
           break;
         case 'too-many-requests':
-          message = 'Too many failed attempts. Please try again later.';
+          message =
+          'Too many failed attempts. Please try again later.';
           break;
       }
 
@@ -174,7 +177,8 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
 
-      print('Firebase Auth user created with UID: ${credential.user?.uid}');
+      print(
+          'Firebase Auth user created with UID: ${credential.user?.uid}');
 
       if (credential.user != null) {
         // Generate member ID (3-digit)
@@ -184,15 +188,14 @@ class AuthProvider extends ChangeNotifier {
         // Calculate initial station limit based on tier
         double initialStationLimit = 0;
         if (tier == UserTier.member) {
-          initialStationLimit = subscriptionFee * 4; // 1500 * 4 = 6000
+          initialStationLimit = subscriptionFee * 4;
         } else if (tier == UserTier.client) {
-          initialStationLimit = subscriptionFee * 4; // 750 * 4 = 3000
+          initialStationLimit = subscriptionFee * 4;
         }
 
         print('Creating Firestore document...');
 
         try {
-          // Create user document in Firestore with all required fields
           final userDoc = {
             'memberId': memberId,
             'name': name,
@@ -201,7 +204,7 @@ class AuthProvider extends ChangeNotifier {
             'platform': 'na',
             'tier': tier.name,
             'status': tier == UserTier.user ? 'active' : 'pending',
-            'joinDate': Timestamp.now(), // Using Timestamp.now() for consistency
+            'joinDate': Timestamp.now(),
             'origin': 'App Registration',
             'recruiterId': referrerId ?? '',
             'referredUsers': [],
@@ -213,7 +216,7 @@ class AuthProvider extends ChangeNotifier {
             'usedBalance': 0,
             'expiredBalance': 0,
             'withdrawalFees': 0,
-            'balanceExpiry': {}, // <-- FIXED: Added missing required field
+            'balanceExpiry': {},
             'points': 0,
             'convertedPoints': 0,
             'socialGiftPoints': 0,
@@ -229,7 +232,7 @@ class AuthProvider extends ChangeNotifier {
             'fundShares': 0,
             'totalShares': 0,
             'totalFunds': 0,
-            'shareBreakdown': {}, // <-- FIXED: Added missing required field
+            'shareBreakdown': {},
             'coldPeriodDays': 0,
             'averageHoldPeriod': 0,
             'netLendings': 0,
@@ -240,46 +243,41 @@ class AuthProvider extends ChangeNotifier {
             'hScore': 0,
             'eScore': 0,
             'overallScore': 0,
-            'createdAt': Timestamp.now(), // Using Timestamp.now() for consistency
-            'updatedAt': Timestamp.now(), // Using Timestamp.now() for consistency
+            'createdAt': Timestamp.now(),
+            'updatedAt': Timestamp.now(),
           };
 
-          print('Attempting to save to Firestore with data: ${userDoc.toString()}');
+          print('Attempting to save to Firestore...');
 
-          // Save to Firestore
           await _firestore
               .collection('users')
               .doc(credential.user!.uid)
               .set(userDoc);
 
-          print('User document created successfully in Firestore');
+          print('User document created successfully');
         } catch (firestoreError) {
           print('Error creating Firestore document: $firestoreError');
-          // Delete the auth user if Firestore creation fails
           await credential.user!.delete();
-          throw Exception('Failed to create user profile: $firestoreError');
+          throw Exception(
+              'Failed to create user profile: $firestoreError');
         }
 
-        // Update referrer if exists
         if (referrerId != null && referrerId.isNotEmpty) {
-          print('Updating referrer: $referrerId');
           await _updateReferrer(referrerId, credential.user!.uid);
         }
 
-        // Send verification email
         try {
           await credential.user!.sendEmailVerification();
-          print('Verification email sent');
         } catch (e) {
           print('Error sending verification email: $e');
         }
 
-        // Sign out until approved (except for User tier)
         if (tier != UserTier.user) {
           await _auth.signOut();
           return {
             'success': true,
-            'message': 'Registration successful! Please wait for admin approval.',
+            'message':
+            'Registration successful! Please wait for admin approval.',
             'needsApproval': true,
           };
         }
@@ -295,7 +293,6 @@ class AuthProvider extends ChangeNotifier {
         'message': 'Registration failed. Please try again.',
       };
     } on FirebaseAuthException catch (e) {
-      print('FirebaseAuthException: ${e.code} - ${e.message}');
       String message = 'Registration failed.';
 
       switch (e.code) {
@@ -306,7 +303,8 @@ class AuthProvider extends ChangeNotifier {
           message = 'Invalid email address format.';
           break;
         case 'weak-password':
-          message = 'Password is too weak. Please use at least 6 characters.';
+          message =
+          'Password is too weak. Please use at least 6 characters.';
           break;
       }
 
@@ -316,7 +314,6 @@ class AuthProvider extends ChangeNotifier {
         'message': message,
       };
     } catch (e) {
-      print('Unexpected error during registration: $e');
       _errorMessage = 'An unexpected error occurred: $e';
       return {
         'success': false,
@@ -330,10 +327,10 @@ class AuthProvider extends ChangeNotifier {
 
   // Generate unique 3-digit member ID
   Future<String> _generateMemberId() async {
-    final random = DateTime.now().millisecondsSinceEpoch % 900 + 100;
+    final random =
+        DateTime.now().millisecondsSinceEpoch % 900 + 100;
     String memberId = random.toString();
 
-    // Check if ID exists
     final query = await _firestore
         .collection('users')
         .where('memberId', isEqualTo: memberId)
@@ -341,7 +338,6 @@ class AuthProvider extends ChangeNotifier {
         .get();
 
     if (query.docs.isNotEmpty) {
-      // Recursively generate new ID if exists
       return _generateMemberId();
     }
 
@@ -349,15 +345,21 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // Update referrer's data
-  Future<void> _updateReferrer(String referrerId, String newUserId) async {
+  Future<void> _updateReferrer(
+      String referrerId, String newUserId) async {
     try {
-      final referrerDoc = await _firestore.collection('users').doc(referrerId).get();
+      final referrerDoc =
+      await _firestore.collection('users').doc(referrerId).get();
       if (referrerDoc.exists) {
         final referrerData = referrerDoc.data()!;
-        List<String> referredUsers = List<String>.from(referrerData['referredUsers'] ?? []);
+        List<String> referredUsers =
+        List<String>.from(referrerData['referredUsers'] ?? []);
         referredUsers.add(newUserId);
 
-        await _firestore.collection('users').doc(referrerId).update({
+        await _firestore
+            .collection('users')
+            .doc(referrerId)
+            .update({
           'referredUsers': referredUsers,
           'updatedAt': Timestamp.now(),
         });
@@ -466,6 +468,17 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // FIXED: Added bodies for the previously empty functions
+  void updateUserContribution(double contributionValue, double balanceCredit) {
+    // TODO: implement actual logic
+    print("Updating user contribution: $contributionValue, balance: $balanceCredit");
+  }
+
+  void updateFundContribution(double amount) {
+    // TODO: implement actual logic
+    print("Updating fund contribution: $amount");
+  }
+
   // Update user profile
   Future<bool> updateUserProfile({
     String? name,
@@ -509,7 +522,8 @@ class AuthProvider extends ChangeNotifier {
   // Check if email is already registered
   Future<bool> isEmailRegistered(String email) async {
     try {
-      final methods = await _auth.fetchSignInMethodsForEmail(email);
+      final methods =
+      await _auth.fetchSignInMethodsForEmail(email);
       return methods.isNotEmpty;
     } catch (e) {
       return false;
