@@ -21,6 +21,7 @@ class AppRoutes {
   static const String manageUsers = '/manage-users';
   static const String userDetails = '/user-details';
   static const String manageGames = '/manage-games';
+  static const String manageContributions = '/manage-contributions';
   static const String addGame = '/add-game';
   static const String editGame = '/edit-game';
   static const String manageVault = '/manage-vault';
@@ -31,6 +32,7 @@ class AppRoutes {
   static const String contributions = '/contributions';
   static const String systemLogs = '/system-logs';
   static const String dataMigration = '/data-migration';
+
 
   // Common Routes
   static const String notifications = '/notifications';

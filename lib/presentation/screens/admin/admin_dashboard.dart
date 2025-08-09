@@ -1,52 +1,45 @@
+// lib/presentation/screens/admin/admin_dashboard.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:share_station/presentation/screens/admin/admin_approval_dashboard.dart';
 
+import '../../../core/theme/app_theme.dart';
+import '../../../routes/app_routes.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../../core/theme/app_theme.dart';
 
-class AdminDashboard extends StatefulWidget {
+class AdminDashboard extends StatelessWidget {
   const AdminDashboard({Key? key}) : super(key: key);
 
-  @override
-  State<AdminDashboard> createState() => _AdminDashboardState();
-}
-
-class _AdminDashboardState extends State<AdminDashboard> {
   @override
   Widget build(BuildContext context) {
     final appProvider = Provider.of<AppProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
     final isArabic = appProvider.isArabic;
     final isDarkMode = appProvider.isDarkMode;
-    final user = authProvider.currentUser;
 
     return Scaffold(
+      backgroundColor: isDarkMode ? AppTheme.darkBackground : AppTheme.lightBackground,
       appBar: AppBar(
+        backgroundColor: AppTheme.primaryColor,
+        elevation: 0,
         title: Text(
-          isArabic ? 'لوحة تحكم المدير' : 'Admin Dashboard',
+          isArabic ? 'لوحة التحكم الإدارية' : 'Admin Dashboard',
           style: TextStyle(
             fontSize: 20.sp,
             fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
         ),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: Icon(Icons.language),
-            onPressed: () => appProvider.toggleLanguage(),
-          ),
-          IconButton(
-            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
-            onPressed: () => appProvider.toggleTheme(),
-          ),
-          IconButton(
-            icon: Icon(Icons.logout),
-            onPressed: () async {
-              await authProvider.signOut();
-              Navigator.pushReplacementNamed(context, '/login');
+            icon: Icon(Icons.notifications, color: Colors.white),
+            onPressed: () {
+              Navigator.pushNamed(context, AppRoutes.notifications);
             },
           ),
         ],
@@ -56,73 +49,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Admin Info Card
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(20.w),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [AppTheme.adminColor, AppTheme.adminColor.withOpacity(0.7)],
-                ),
-                borderRadius: BorderRadius.circular(16.r),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isArabic
-                        ? 'مرحباً، ${user?.name ?? 'مدير'}'
-                        : 'Welcome, ${user?.name ?? 'Admin'}',
-                    style: TextStyle(
-                      fontSize: 24.sp,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 8.h),
-                  Row(
-                    children: [
-                      Icon(
-                        FontAwesomeIcons.shieldHalved,
-                        color: Colors.white70,
-                        size: 16.sp,
-                      ),
-                      SizedBox(width: 8.w),
-                      Text(
-                        isArabic ? 'صلاحيات كاملة' : 'Full Access',
-                        style: TextStyle(
-                          fontSize: 14.sp,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            SizedBox(height: 24.h),
-
-            // Borrow Window Control
+            // Welcome message
             Container(
               padding: EdgeInsets.all(16.w),
               decoration: BoxDecoration(
-                color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+                gradient: LinearGradient(
+                  colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(12.r),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
-                  ),
-                ],
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.schedule,
-                    color: AppTheme.primaryColor,
-                    size: 32.sp,
+                  CircleAvatar(
+                    radius: 30.r,
+                    backgroundColor: Colors.white,
+                    child: Icon(
+                      FontAwesomeIcons.userShield,
+                      color: AppTheme.primaryColor,
+                      size: 28.sp,
+                    ),
                   ),
                   SizedBox(width: 16.w),
                   Expanded(
@@ -130,32 +77,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isArabic ? 'نافذة الاستعارة' : 'Borrow Window',
+                          isArabic
+                              ? 'مرحباً، ${authProvider.currentUser?.name ?? "المشرف"}'
+                              : 'Welcome, ${authProvider.currentUser?.name ?? "Admin"}',
                           style: TextStyle(
-                            fontSize: 16.sp,
+                            fontSize: 18.sp,
                             fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
+                        SizedBox(height: 4.h),
                         Text(
-                          isArabic
-                              ? 'التحكم في توقيت الاستعارة'
-                              : 'Control borrowing availability',
+                          isArabic ? 'لوحة التحكم الكاملة' : 'Full Control Panel',
                           style: TextStyle(
-                            fontSize: 12.sp,
-                            color: isDarkMode
-                                ? AppTheme.darkTextSecondary
-                                : AppTheme.lightTextSecondary,
+                            fontSize: 14.sp,
+                            color: Colors.white.withOpacity(0.9),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  Switch(
-                    value: appProvider.isBorrowWindowOpen,
-                    onChanged: (value) {
-                      appProvider.toggleBorrowWindow(value);
-                    },
-                    activeColor: AppTheme.successColor,
                   ),
                 ],
               ),
@@ -163,9 +103,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             SizedBox(height: 24.h),
 
-            // Quick Stats
+            // Statistics Section
             Text(
-              isArabic ? 'إحصائيات سريعة' : 'Quick Stats',
+              isArabic ? 'الإحصائيات' : 'Statistics',
               style: TextStyle(
                 fontSize: 18.sp,
                 fontWeight: FontWeight.bold,
@@ -174,50 +114,95 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             SizedBox(height: 12.h),
 
+            // Real-time stats grid
             GridView.count(
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
               crossAxisCount: 2,
-              mainAxisSpacing: 12.h,
+              childAspectRatio: 1.5,
               crossAxisSpacing: 12.w,
-              childAspectRatio: 1.4, // FIXED: Changed from 1.5 to give more height
+              mainAxisSpacing: 12.h,
               children: [
-                _buildStatCard(
-                  title: isArabic ? 'المستخدمون' : 'Total Users',
-                  value: '250+',
-                  icon: FontAwesomeIcons.users,
-                  color: AppTheme.primaryColor,
-                  isDarkMode: isDarkMode,
-                ),
-                _buildStatCard(
-                  title: isArabic ? 'الألعاب' : 'Total Games',
-                  value: '150+',
-                  icon: FontAwesomeIcons.gamepad,
-                  color: AppTheme.secondaryColor,
-                  isDarkMode: isDarkMode,
-                ),
-                _buildStatCard(
-                  title: isArabic ? 'في الانتظار' : 'Pending',
-                  value: '5',
-                  icon: FontAwesomeIcons.clock,
-                  color: AppTheme.warningColor,
-                  isDarkMode: isDarkMode,
-                  // ADD THE NAVIGATION LOGIC HERE AS WELL
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const AdminApprovalDashboard(),
-                      ),
+                // Total Members - Fixed query
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .where('tier', whereIn: ['member', 'vip', 'client'])
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    return _buildStatCard(
+                      title: isArabic ? 'الأعضاء' : 'Members',
+                      value: count.toString(),
+                      icon: FontAwesomeIcons.users,
+                      color: AppTheme.primaryColor,
+                      isDarkMode: isDarkMode,
                     );
                   },
                 ),
-                _buildStatCard(
-                  title: isArabic ? 'الإيرادات' : 'Revenue',
-                  value: '15,000 LE',
-                  icon: FontAwesomeIcons.dollarSign,
-                  color: AppTheme.successColor,
-                  isDarkMode: isDarkMode,
+
+                // Total Game Accounts - Fixed query
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('games')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    int totalAccounts = 0;
+                    if (snapshot.hasData) {
+                      for (var doc in snapshot.data!.docs) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        // Count accounts if they exist, otherwise count as 1
+                        if (data['accounts'] != null && data['accounts'] is List) {
+                          totalAccounts += (data['accounts'] as List).length;
+                        } else {
+                          totalAccounts += 1; // Old structure, count as single account
+                        }
+                      }
+                    }
+                    return _buildStatCard(
+                      title: isArabic ? 'الألعاب' : 'Game Accounts',
+                      value: totalAccounts.toString(),
+                      icon: FontAwesomeIcons.gamepad,
+                      color: AppTheme.secondaryColor,
+                      isDarkMode: isDarkMode,
+                    );
+                  },
+                ),
+
+                // Pending Contributions
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('contribution_requests')
+                      .where('status', isEqualTo: 'pending')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    return _buildStatCard(
+                      title: isArabic ? 'مساهمات معلقة' : 'Pending Contrib.',
+                      value: count.toString(),
+                      icon: FontAwesomeIcons.clock,
+                      color: AppTheme.warningColor,
+                      isDarkMode: isDarkMode,
+                    );
+                  },
+                ),
+
+                // Active Borrows
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('borrow_requests')
+                      .where('status', isEqualTo: 'approved')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                    return _buildStatCard(
+                      title: isArabic ? 'استعارات نشطة' : 'Active Borrows',
+                      value: count.toString(),
+                      icon: FontAwesomeIcons.handHoldingUsd,
+                      color: AppTheme.successColor,
+                      isDarkMode: isDarkMode,
+                    );
+                  },
                 ),
               ],
             ),
@@ -235,6 +220,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             SizedBox(height: 12.h),
 
+            // Action tiles
             _buildActionTile(
               title: isArabic ? 'إدارة المستخدمين' : 'Manage Users',
               subtitle: isArabic
@@ -243,8 +229,87 @@ class _AdminDashboardState extends State<AdminDashboard> {
               icon: FontAwesomeIcons.userGear,
               color: AppTheme.primaryColor,
               onTap: () {
-                // Navigate to manage users
+                Navigator.pushNamed(context, AppRoutes.manageUsers);
               },
+              context: context,
+            ),
+
+            _buildActionTile(
+              title: isArabic ? 'إدارة المساهمات' : 'Manage Contributions',
+              subtitle: isArabic
+                  ? 'الموافقة على المساهمات الجديدة'
+                  : 'Approve new game contributions',
+              icon: FontAwesomeIcons.handHoldingUsd,
+              color: AppTheme.warningColor,
+              badge: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('contribution_requests')
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                  return count > 0
+                      ? Container(
+                    padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorColor,
+                      borderRadius: BorderRadius.circular(10.r),
+                    ),
+                    child: Text(
+                      count.toString(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                      : SizedBox.shrink();
+                },
+              ),
+              onTap: () {
+                Navigator.pushNamed(context, AppRoutes.manageContributions);
+              },
+              context: context,
+            ),
+
+            _buildActionTile(
+              title: isArabic ? 'طلبات الاستعارة' : 'Borrow Requests',
+              subtitle: isArabic
+                  ? 'إدارة طلبات الاستعارة والإرجاع'
+                  : 'Manage borrow and return requests',
+              icon: FontAwesomeIcons.exchange,
+              color: AppTheme.infoColor,
+              badge: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('borrow_requests')
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  final count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+                  return count > 0
+                      ? Container(
+                    padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorColor,
+                      borderRadius: BorderRadius.circular(10.r),
+                    ),
+                    child: Text(
+                      count.toString(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                      : SizedBox.shrink();
+                },
+              ),
+              onTap: () {
+                Navigator.pushNamed(context, AppRoutes.borrowRequests);
+              },
+              context: context,
             ),
 
             _buildActionTile(
@@ -255,26 +320,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               icon: FontAwesomeIcons.gamepad,
               color: AppTheme.secondaryColor,
               onTap: () {
-                // Navigate to manage games
+                Navigator.pushNamed(context, AppRoutes.manageGames);
               },
-            ),
-
-            _buildActionTile(
-              title: isArabic ? 'الموافقات المعلقة' : 'Pending Approvals',
-              subtitle: isArabic
-                  ? 'مراجعة طلبات العضوية الجديدة'
-                  : 'Review new membership requests',
-              icon: FontAwesomeIcons.userCheck,
-              color: AppTheme.warningColor,
-              onTap: () {
-                // ADD YOUR NAVIGATION CODE HERE
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const AdminApprovalDashboard(), // Assuming you have this screen created
-                  ),
-                );
-              },
+              context: context,
             ),
 
             _buildActionTile(
@@ -283,22 +331,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ? 'عرض التقارير والإحصائيات'
                   : 'View reports and statistics',
               icon: FontAwesomeIcons.chartLine,
-              color: AppTheme.infoColor,
+              color: AppTheme.successColor,
               onTap: () {
-                // Navigate to analytics
+                Navigator.pushNamed(context, AppRoutes.analytics);
               },
+              context: context,
             ),
 
             _buildActionTile(
-              title: isArabic ? 'ترحيل البيانات' : 'Data Migration',
+              title: isArabic ? 'الإعدادات' : 'Settings',
               subtitle: isArabic
-                  ? 'استيراد البيانات من Excel'
-                  : 'Import data from Excel',
-              icon: FontAwesomeIcons.fileImport,
-              color: AppTheme.successColor,
+                  ? 'إعدادات النظام والتكوين'
+                  : 'System settings and configuration',
+              icon: FontAwesomeIcons.cog,
+              color: Colors.grey,
               onTap: () {
-                // Navigate to data migration
+                Navigator.pushNamed(context, AppRoutes.adminSettings);
               },
+              context: context,
             ),
           ],
         ),
@@ -312,53 +362,47 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required IconData icon,
     required Color color,
     required bool isDarkMode,
-    VoidCallback? onTap, // ADD THIS LINE
   }) {
-    return InkWell( // WRAP WITH INKWELL
-      onTap: onTap, // USE THE CALLBACK HERE
-      borderRadius: BorderRadius.circular(12.r),
-      child: Container(
-        padding: EdgeInsets.all(16.w),
-        decoration: BoxDecoration(
-          color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-          borderRadius: BorderRadius.circular(12.r),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
+    return Container(
+      padding: EdgeInsets.all(16.w),
+      decoration: BoxDecoration(
+        color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(12.r),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            color: color,
+            size: 28.sp,
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24.sp,
+              fontWeight: FontWeight.bold,
               color: color,
-              size: 28.sp,
             ),
-            SizedBox(height: 8.h),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20.sp,
-                fontWeight: FontWeight.bold,
-              ),
+          ),
+          SizedBox(height: 4.h),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12.sp,
+              color: Colors.grey,
             ),
-            SizedBox(height: 2.h),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12.sp,
-                color: isDarkMode
-                    ? AppTheme.darkTextSecondary
-                    : AppTheme.lightTextSecondary,
-              ),
-              textAlign: TextAlign.center, // Added for better text wrapping
-            ),
-          ],
-        ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -369,51 +413,77 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required IconData icon,
     required Color color,
     required VoidCallback onTap,
+    required BuildContext context,
+    Widget? badge,
   }) {
-    final isDarkMode = Provider.of<AppProvider>(context, listen: false).isDarkMode;
-
     return Container(
       margin: EdgeInsets.only(bottom: 12.h),
-      child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          padding: EdgeInsets.all(10.w),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10.r),
-          ),
-          child: Icon(
-            icon,
-            color: color,
-            size: 24.sp,
-          ),
-        ),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontSize: 16.sp,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(
-            fontSize: 12.sp,
-            color: isDarkMode
-                ? AppTheme.darkTextSecondary
-                : AppTheme.lightTextSecondary,
-          ),
-        ),
-        trailing: Icon(
-          Icons.arrow_forward_ios,
-          size: 16.sp,
-          color: isDarkMode
-              ? AppTheme.darkTextSecondary
-              : AppTheme.lightTextSecondary,
-        ),
-        tileColor: isDarkMode ? AppTheme.darkSurface : Colors.white,
-        shape: RoundedRectangleBorder(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(12.r),
+          child: Container(
+            padding: EdgeInsets.all(16.w),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.grey.withOpacity(0.2),
+              ),
+              borderRadius: BorderRadius.circular(12.r),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(12.w),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: color,
+                    size: 24.sp,
+                  ),
+                ),
+                SizedBox(width: 16.w),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 16.sp,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (badge != null) ...[
+                            SizedBox(width: 8.w),
+                            badge,
+                          ],
+                        ],
+                      ),
+                      SizedBox(height: 4.h),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 13.sp,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.grey,
+                  size: 16.sp,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

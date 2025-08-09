@@ -6,7 +6,8 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
-
+import 'presentation/screens/admin/manage_contributions_screen.dart';
+import 'presentation/screens/admin/manage_borrow_requests_screen.dart';
 // Import providers
 import 'presentation/providers/app_provider.dart';
 import 'presentation/providers/auth_provider.dart';
@@ -21,7 +22,7 @@ import 'presentation/screens/auth/login_screen.dart';
 import 'presentation/screens/auth/register_screen.dart';
 import 'presentation/screens/user/user_dashboard.dart';
 import 'presentation/screens/admin/admin_dashboard.dart';
-
+import 'presentation/screens/admin/manage_contributions_screen.dart';
 // ADD THESE NEW IMPORTS
 import 'presentation/screens/user/add_contribution_screen.dart';
 import 'presentation/screens/user/my_contributions_screen.dart';
@@ -109,6 +110,9 @@ class ShareStationApp extends StatelessWidget {
                   AppRoutes.register: (context) => const RegisterScreen(),
                   AppRoutes.userDashboard: (context) => const MainLayout(),
                   AppRoutes.adminDashboard: (context) => const MainLayout(),
+                  AppRoutes.manageContributions: (context) => const ManageContributionsScreen(),
+                  AppRoutes.pendingApprovals: (context) => const ManageContributionsScreen(),
+                  AppRoutes.borrowRequests: (context) => const ManageBorrowRequestsScreen(),
 
                   // ADD THESE NEW ROUTES
                   '/add-contribution': (context) => const AddContributionScreen(),

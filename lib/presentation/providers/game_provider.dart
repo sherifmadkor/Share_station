@@ -1,39 +1,68 @@
+// lib/presentation/providers/game_provider.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../data/models/game_model.dart' hide Platform;
+import '../../data/models/game_model.dart' as game_models; // Import with prefix to avoid conflicts
 import '../../data/models/user_model.dart';
-import 'auth_provider.dart';
+import '../../services/borrow_service.dart';
 
 class GameProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final BorrowService _borrowService = BorrowService();
 
-  List<GameAccount> _games = [];
-  List<GameAccount> _userBorrowings = [];
+  List<game_models.GameAccount> _games = [];
+  List<Map<String, dynamic>> _userBorrowings = [];
   bool _isLoading = false;
   String? _errorMessage;
 
   // Getters
-  List<GameAccount> get games => _games;
-  List<GameAccount> get userBorrowings => _userBorrowings;
+  List<game_models.GameAccount> get games => _games;
+  List<Map<String, dynamic>> get userBorrowings => _userBorrowings;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  // Get available games
-  List<GameAccount> get availableGames {
+  // Get available games (games with at least one available slot)
+  List<game_models.GameAccount> get availableGames {
     return _games.where((game) => game.availableSlotsCount > 0).toList();
   }
 
-  // Get games by category
-  List<GameAccount> getGamesByCategory(LenderTier tier) {
+  // Get games by lender tier
+  List<game_models.GameAccount> getGamesByLenderTier(game_models.LenderTier tier) {
     return _games.where((game) => game.lenderTier == tier).toList();
   }
 
+  // Get member games
+  List<game_models.GameAccount> get memberGames {
+    return getGamesByLenderTier(game_models.LenderTier.member);
+  }
+
+  // Get vault games
+  List<game_models.GameAccount> get vaultGames {
+    return getGamesByLenderTier(game_models.LenderTier.gamesVault);
+  }
+
   // Get games by platform
-  List<GameAccount> getGamesByPlatform(Platform platform) {
+  List<game_models.GameAccount> getGamesByPlatform(game_models.Platform platform) {
     return _games.where((game) => game.supportedPlatforms.contains(platform)).toList();
   }
 
-  // Load all games
+  // Search games by title
+  List<game_models.GameAccount> searchGames(String query) {
+    if (query.isEmpty) return _games;
+
+    final lowerQuery = query.toLowerCase();
+    return _games.where((game) {
+      // Search in main title
+      if (game.title.toLowerCase().contains(lowerQuery)) return true;
+      // Search in included titles
+      for (var title in game.includedTitles) {
+        if (title.toLowerCase().contains(lowerQuery)) return true;
+      }
+      return false;
+    }).toList();
+  }
+
+  // Load all games from Firestore
   Future<void> loadGames() async {
     _isLoading = true;
     _errorMessage = null;
@@ -42,19 +71,19 @@ class GameProvider extends ChangeNotifier {
     try {
       final querySnapshot = await _firestore
           .collection('games')
-          .where('isActive', isEqualTo: true)
           .get();
 
       _games = querySnapshot.docs
-          .map((doc) => GameAccount.fromFirestore(doc))
+          .map((doc) => game_models.GameAccount.fromFirestore(doc))
           .toList();
 
       // Sort by date added (newest first)
       _games.sort((a, b) => b.dateAdded.compareTo(a.dateAdded));
 
+      _errorMessage = null;
     } catch (e) {
       print('Error loading games: $e');
-      _errorMessage = 'Failed to load games';
+      _errorMessage = 'Failed to load games: $e';
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -67,36 +96,17 @@ class GameProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Query games where user has active borrowings
-      final querySnapshot = await _firestore
-          .collection('borrows')
-          .where('borrowerId', isEqualTo: userId)
-          .where('status', isEqualTo: 'active')
-          .get();
+      _userBorrowings = await _borrowService.getUserActiveBorrows(userId);
 
-      // Get game IDs from borrowings
-      final gameIds = querySnapshot.docs
-          .map((doc) => doc.data()['gameId'] as String)
-          .toSet()
-          .toList();
-
-      if (gameIds.isNotEmpty) {
-        // Load the actual game data
-        final gamesSnapshot = await _firestore
-            .collection('games')
-            .where(FieldPath.documentId, whereIn: gameIds)
-            .get();
-
-        _userBorrowings = gamesSnapshot.docs
-            .map((doc) => GameAccount.fromFirestore(doc))
-            .toList();
-      } else {
-        _userBorrowings = [];
-      }
-
+      // Sort by borrow date (newest first)
+      _userBorrowings.sort((a, b) {
+        final dateA = a['approvalDate'] as Timestamp?;
+        final dateB = b['approvalDate'] as Timestamp?;
+        if (dateA == null || dateB == null) return 0;
+        return dateB.compareTo(dateA);
+      });
     } catch (e) {
       print('Error loading user borrowings: $e');
-      _errorMessage = 'Failed to load borrowings';
       _userBorrowings = [];
     } finally {
       _isLoading = false;
@@ -104,128 +114,74 @@ class GameProvider extends ChangeNotifier {
     }
   }
 
-  // Request to borrow a game
-  Future<Map<String, dynamic>> borrowGame({
+  // Submit borrow request for a game
+  Future<Map<String, dynamic>> submitBorrowRequest({
     required String userId,
+    required String userName,
     required String gameId,
-    required Platform platform,
-    required AccountType accountType,
-    required double borrowValue,
+    required game_models.GameAccount game,
+    required game_models.Platform platform,
+    required game_models.AccountType accountType,
   }) async {
     try {
-      // Create borrow request document
-      final borrowDoc = {
-        'borrowerId': userId,
-        'gameId': gameId,
-        'platform': platform.name,
-        'accountType': accountType.name,
-        'borrowValue': borrowValue,
-        'borrowDate': FieldValue.serverTimestamp(),
-        'status': 'active',
-        'expectedReturnDate': DateTime.now().add(Duration(days: 30)).toIso8601String(),
-        'createdAt': FieldValue.serverTimestamp(),
-      };
+      // Find an available account with the requested slot
+      String? availableAccountId;
 
-      // Add to borrows collection
-      await _firestore.collection('borrows').add(borrowDoc);
+      if (game.accounts != null && game.accounts!.isNotEmpty) {
+        // New structure with multiple accounts
+        for (var account in game.accounts!) {
+          final slotKey = '${platform.value}_${accountType.value}';
+          if (account['slots'] != null && account['slots'][slotKey] != null) {
+            final slotData = account['slots'][slotKey];
+            if (slotData['status'] == 'available') {
+              availableAccountId = account['accountId'];
+              break;
+            }
+          }
+        }
+      } else {
+        // Old structure - check main slots
+        final slotKey = '${platform.value}_${accountType.value}';
+        if (game.slots[slotKey]?.status == game_models.SlotStatus.available) {
+          availableAccountId = game.accountId;
+        }
+      }
 
-      // Update game slot status
-      final slotKey = '${platform.name}_${accountType.name}';
-      await _firestore.collection('games').doc(gameId).update({
-        'slots.$slotKey.status': 'taken',
-        'slots.$slotKey.borrowerId': userId,
-        'slots.$slotKey.borrowDate': FieldValue.serverTimestamp(),
-        'currentBorrows': FieldValue.increment(1),
-        'totalBorrows': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      if (availableAccountId == null) {
+        return {
+          'success': false,
+          'message': 'No available slot found for this platform and account type',
+        };
+      }
 
-      // Update user's borrow count and station limit
-      await _firestore.collection('users').doc(userId).update({
-        'currentBorrows': FieldValue.increment(1),
-        'remainingStationLimit': FieldValue.increment(-borrowValue),
-        'lastActivityDate': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Reload games to reflect changes
-      await loadGames();
-
-      return {
-        'success': true,
-        'message': 'Game borrowed successfully!',
-      };
-
+      return await _borrowService.submitBorrowRequest(
+        userId: userId,
+        userName: userName,
+        gameId: gameId,
+        gameTitle: game.title,
+        accountId: availableAccountId,
+        platform: platform,
+        accountType: accountType,
+        borrowValue: game.gameValue, // Changed from gameValue to borrowValue
+      );
     } catch (e) {
-      print('Error borrowing game: $e');
+      print('Error submitting borrow request: $e');
       return {
         'success': false,
-        'message': 'Failed to borrow game: $e',
+        'message': 'Failed to submit borrow request: $e',
       };
     }
   }
 
-  // Return a borrowed game
-  Future<Map<String, dynamic>> returnGame({
-    required String userId,
-    required String gameId,
-    required String borrowId,
-    required Platform platform,
-    required AccountType accountType,
-    required double borrowValue,
-  }) async {
-    try {
-      // Update borrow document
-      await _firestore.collection('borrows').doc(borrowId).update({
-        'status': 'completed',
-        'returnDate': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Update game slot status
-      final slotKey = '${platform.name}_${accountType.name}';
-      await _firestore.collection('games').doc(gameId).update({
-        'slots.$slotKey.status': 'available',
-        'slots.$slotKey.borrowerId': null,
-        'slots.$slotKey.borrowDate': null,
-        'currentBorrows': FieldValue.increment(-1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Update user's borrow count and station limit
-      await _firestore.collection('users').doc(userId).update({
-        'currentBorrows': FieldValue.increment(-1),
-        'remainingStationLimit': FieldValue.increment(borrowValue),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Reload games and borrowings
-      await loadGames();
-      await loadUserBorrowings(userId);
-
-      return {
-        'success': true,
-        'message': 'Game returned successfully!',
-      };
-
-    } catch (e) {
-      print('Error returning game: $e');
-      return {
-        'success': false,
-        'message': 'Failed to return game: $e',
-      };
-    }
-  }
-
-  // Add a new game (Admin only)
+  // Add a new game (Admin only) - FIXED VERSION
   Future<Map<String, dynamic>> addGame({
     required String title,
     required List<String> includedTitles,
     required String contributorId,
     required String contributorName,
-    required LenderTier lenderTier,
-    required List<Platform> supportedPlatforms,
-    required List<AccountType> sharingOptions,
+    required game_models.LenderTier lenderTier,
+    required List<game_models.Platform> supportedPlatforms,
+    required List<game_models.AccountType> sharingOptions,
     required double gameValue,
     String? coverImageUrl,
     String? description,
@@ -239,11 +195,11 @@ class GameProvider extends ChangeNotifier {
       Map<String, dynamic> slots = {};
       for (var platform in supportedPlatforms) {
         for (var accountType in sharingOptions) {
-          final slotKey = '${platform.name}_${accountType.name}';
+          final slotKey = '${platform.value}_${accountType.value}';
           slots[slotKey] = {
-            'platform': platform.name,
-            'accountType': accountType.name,
-            'status': 'available',
+            'platform': platform.value,
+            'accountType': accountType.value,
+            'status': game_models.SlotStatus.available.value,
             'borrowerId': null,
             'borrowDate': null,
             'expectedReturnDate': null,
@@ -253,40 +209,58 @@ class GameProvider extends ChangeNotifier {
         }
       }
 
-      // Create game document
-      final gameDoc = {
-        'title': title,
-        'includedTitles': includedTitles,
-        'coverImageUrl': coverImageUrl,
-        'description': description,
-        'email': email ?? '',
-        'password': password ?? '',
-        'edition': edition,
-        'region': region,
+      // Create account object for new structure
+      final accountData = {
+        'accountId': DateTime.now().millisecondsSinceEpoch.toString(),
         'contributorId': contributorId,
         'contributorName': contributorName,
-        'lenderTier': lenderTier.name,
-        'dateAdded': FieldValue.serverTimestamp(),
-        'isActive': true,
-        'supportedPlatforms': supportedPlatforms.map((p) => p.name).toList(),
-        'sharingOptions': sharingOptions.map((a) => a.name).toList(),
+        'platforms': supportedPlatforms.map((p) => p.value).toList(),
+        'sharingOptions': sharingOptions.map((a) => a.value).toList(),
+        'credentials': {
+          'email': email ?? '',
+          'password': password ?? '',
+        },
+        'edition': edition ?? 'standard',
+        'region': region ?? 'US',
+        'status': 'available',
         'slots': slots,
         'gameValue': gameValue,
-        'totalCost': gameValue,
-        'totalRevenues': 0,
-        'borrowRevenue': 0,
-        'sellRevenue': 0,
-        'fundShareRevenue': 0,
-        'totalBorrows': 0,
-        'currentBorrows': 0,
-        'averageBorrowDuration': 0,
-        'borrowHistory': [],
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'dateAdded': FieldValue.serverTimestamp(),
+        'isActive': true,
       };
 
-      // Add to Firestore
-      await _firestore.collection('games').add(gameDoc);
+      // Check if game already exists
+      final gameQuery = await _firestore
+          .collection('games')
+          .where('title', isEqualTo: title)
+          .limit(1)
+          .get();
+
+      if (gameQuery.docs.isEmpty) {
+        // Create new game document with accounts array
+        await _firestore.collection('games').add({
+          'title': title,
+          'includedTitles': includedTitles,
+          'coverImageUrl': coverImageUrl,
+          'description': description,
+          'lenderTier': lenderTier.value,
+          'accounts': [accountData], // Array of accounts
+          'totalValue': gameValue,
+          'totalAccounts': 1,
+          'availableAccounts': 1,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Add account to existing game
+        await gameQuery.docs.first.reference.update({
+          'accounts': FieldValue.arrayUnion([accountData]),
+          'totalValue': FieldValue.increment(gameValue),
+          'totalAccounts': FieldValue.increment(1),
+          'availableAccounts': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       // Update contributor's game shares
       await _firestore.collection('users').doc(contributorId).update({
@@ -315,47 +289,128 @@ class GameProvider extends ChangeNotifier {
     }
   }
 
-  // Search games
-  List<GameAccount> searchGames(String query) {
-    if (query.isEmpty) return _games;
-
-    final lowercaseQuery = query.toLowerCase();
-    return _games.where((game) {
-      return game.title.toLowerCase().contains(lowercaseQuery) ||
-          game.includedTitles.any((title) =>
-              title.toLowerCase().contains(lowercaseQuery));
-    }).toList();
-  }
-
-  // Get game by ID
-  GameAccount? getGameById(String gameId) {
+  // Update game details (Admin only)
+  Future<Map<String, dynamic>> updateGame({
+    required String gameId,
+    String? title,
+    List<String>? includedTitles,
+    String? coverImageUrl,
+    String? description,
+    double? gameValue,
+    bool? isActive,
+  }) async {
     try {
-      return _games.firstWhere((game) => game.accountId == gameId);
+      Map<String, dynamic> updates = {
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (title != null) updates['title'] = title;
+      if (includedTitles != null) updates['includedTitles'] = includedTitles;
+      if (coverImageUrl != null) updates['coverImageUrl'] = coverImageUrl;
+      if (description != null) updates['description'] = description;
+      if (gameValue != null) updates['gameValue'] = gameValue;
+      if (isActive != null) updates['isActive'] = isActive;
+
+      await _firestore.collection('games').doc(gameId).update(updates);
+
+      // Reload games
+      await loadGames();
+
+      return {
+        'success': true,
+        'message': 'Game updated successfully!',
+      };
     } catch (e) {
-      return null;
+      print('Error updating game: $e');
+      return {
+        'success': false,
+        'message': 'Failed to update game: $e',
+      };
     }
   }
 
-  // Listen to real-time game updates
-  void listenToGames() {
-    _firestore
-        .collection('games')
-        .where('isActive', isEqualTo: true)
-        .snapshots()
-        .listen((snapshot) {
-      _games = snapshot.docs
-          .map((doc) => GameAccount.fromFirestore(doc))
-          .toList();
+  // Delete game (Admin only)
+  Future<Map<String, dynamic>> deleteGame(String gameId) async {
+    try {
+      // Get game data first
+      final gameDoc = await _firestore.collection('games').doc(gameId).get();
+      if (!gameDoc.exists) {
+        return {
+          'success': false,
+          'message': 'Game not found',
+        };
+      }
 
-      // Sort by date added (newest first)
-      _games.sort((a, b) => b.dateAdded.compareTo(a.dateAdded));
+      final gameData = gameDoc.data()!;
 
-      notifyListeners();
-    }, onError: (error) {
-      print('Error listening to games: $error');
-      _errorMessage = 'Failed to load games';
-      notifyListeners();
-    });
+      // Check if there are active borrows
+      bool hasActiveBorrows = false;
+      if (gameData['accounts'] != null) {
+        for (var account in gameData['accounts']) {
+          if (account['slots'] != null) {
+            for (var slot in account['slots'].values) {
+              if (slot['status'] == 'taken') {
+                hasActiveBorrows = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (hasActiveBorrows) {
+        return {
+          'success': false,
+          'message': 'Cannot delete game with active borrows',
+        };
+      }
+
+      // Delete the game
+      await _firestore.collection('games').doc(gameId).delete();
+
+      // Reload games
+      await loadGames();
+
+      return {
+        'success': true,
+        'message': 'Game deleted successfully!',
+      };
+    } catch (e) {
+      print('Error deleting game: $e');
+      return {
+        'success': false,
+        'message': 'Failed to delete game: $e',
+      };
+    }
+  }
+
+  // Get game statistics
+  Map<String, dynamic> getGameStatistics() {
+    int totalGames = _games.length;
+    int availableGames = _games.where((g) => g.hasAvailableSlots).length;
+    int memberGames = _games.where((g) => g.lenderTier == game_models.LenderTier.member).length;
+    int vaultGames = _games.where((g) => g.lenderTier == game_models.LenderTier.gamesVault).length;
+
+    int totalSlots = 0;
+    int availableSlots = 0;
+    int takenSlots = 0;
+
+    for (var game in _games) {
+      totalSlots += game.slots.length;
+      availableSlots += game.slots.values.where((s) => s.status == game_models.SlotStatus.available).length;
+      takenSlots += game.slots.values.where((s) => s.status == game_models.SlotStatus.taken).length;
+    }
+
+    return {
+      'totalGames': totalGames,
+      'availableGames': availableGames,
+      'memberGames': memberGames,
+      'vaultGames': vaultGames,
+      'totalSlots': totalSlots,
+      'availableSlots': availableSlots,
+      'takenSlots': takenSlots,
+      'utilizationRate': totalSlots > 0 ? (takenSlots / totalSlots * 100).toStringAsFixed(1) : '0',
+    };
   }
 
   // Clear provider data

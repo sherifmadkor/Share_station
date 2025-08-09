@@ -1,9 +1,8 @@
+// lib/data/models/game_model.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Import Platform from user_model but we'll redefine it here for clarity
-// Or you can import it: import '../user_model.dart' show Platform;
-
-// Redefine Platform here to ensure it has the .value getter
+// Platform enum with proper value getter
 enum Platform {
   ps4('PS4'),
   ps5('PS5'),
@@ -12,7 +11,7 @@ enum Platform {
   final String displayName;
   const Platform(this.displayName);
 
-  // Use this for storing in Firebase instead of .name
+  // Use this for storing in Firebase
   String get value {
     switch (this) {
       case Platform.ps4:
@@ -37,6 +36,7 @@ enum Platform {
   }
 }
 
+// Account Type enum with multipliers
 enum AccountType {
   full('Full Account'),
   primary('Primary'),
@@ -46,7 +46,7 @@ enum AccountType {
   final String displayName;
   const AccountType(this.displayName);
 
-  // Use this for storing in Firebase instead of .name
+  // Use this for storing in Firebase
   String get value {
     switch (this) {
       case AccountType.full:
@@ -69,39 +69,54 @@ enum AccountType {
       case 'secondary':
         return AccountType.secondary;
       case 'psplus':
+      case 'ps plus':
         return AccountType.psPlus;
       default:
         return AccountType.primary;
     }
   }
 
-  // Get borrow value multiplier
+  // Get borrow value multiplier (for calculating Station Limit deduction)
   double get borrowMultiplier {
     switch (this) {
       case AccountType.full:
       case AccountType.primary:
-        return 1.0;
+        return 1.0;  // 100% of game value
       case AccountType.secondary:
-        return 0.75;
+        return 0.75; // 75% of game value
       case AccountType.psPlus:
-        return 2.0;
+        return 2.0;  // 200% of game value
     }
   }
 
-  // Get share count value
+  // Get share count value (for calculating total shares)
   double get shareValue {
     switch (this) {
       case AccountType.full:
       case AccountType.primary:
-        return 1.0;
+        return 1.0;  // Counts as 1 share
       case AccountType.secondary:
-        return 0.5;
+        return 0.5;  // Counts as 0.5 share
       case AccountType.psPlus:
-        return 2.0;
+        return 2.0;  // Counts as 2 shares
+    }
+  }
+
+  // Get borrow limit impact
+  double get borrowLimitImpact {
+    switch (this) {
+      case AccountType.full:
+      case AccountType.primary:
+        return 1.0;  // Uses 1 borrow slot
+      case AccountType.secondary:
+        return 0.5;  // Uses 0.5 borrow slot
+      case AccountType.psPlus:
+        return 2.0;  // Uses 2 borrow slots
     }
   }
 }
 
+// Slot Status enum
 enum SlotStatus {
   available('Available'),
   taken('Taken'),
@@ -111,7 +126,6 @@ enum SlotStatus {
   final String displayName;
   const SlotStatus(this.displayName);
 
-  // Use this for storing in Firebase instead of .name
   String get value {
     switch (this) {
       case SlotStatus.available:
@@ -134,12 +148,17 @@ enum SlotStatus {
       case 'reserved':
         return SlotStatus.reserved;
       case 'notavailable':
+      case 'not available':
       default:
         return SlotStatus.notAvailable;
     }
   }
+
+  bool get canBorrow => this == SlotStatus.available;
+  bool get isOccupied => this == SlotStatus.taken || this == SlotStatus.reserved;
 }
 
+// Lender Tier enum
 enum LenderTier {
   gamesVault('Games Vault'),
   member('Member'),
@@ -149,7 +168,6 @@ enum LenderTier {
   final String displayName;
   const LenderTier(this.displayName);
 
-  // Use this for storing in Firebase instead of .name
   String get value {
     switch (this) {
       case LenderTier.gamesVault:
@@ -166,10 +184,12 @@ enum LenderTier {
   static LenderTier fromString(String value) {
     switch (value.toLowerCase()) {
       case 'gamesvault':
+      case 'vault':
         return LenderTier.gamesVault;
       case 'member':
         return LenderTier.member;
       case 'nonmember':
+      case 'non-member':
         return LenderTier.nonMember;
       case 'admin':
         return LenderTier.admin;
@@ -177,41 +197,84 @@ enum LenderTier {
         return LenderTier.nonMember;
     }
   }
+
+  // Priority order for borrowing
+  int get priority {
+    switch (this) {
+      case LenderTier.member:
+        return 1; // Highest priority (free for members)
+      case LenderTier.gamesVault:
+        return 2; // Second priority
+      case LenderTier.admin:
+        return 3;
+      case LenderTier.nonMember:
+        return 4; // Lowest priority
+    }
+  }
 }
 
+// Game Slot class representing each borrowable slot
 class GameSlot {
   final Platform platform;
   final AccountType accountType;
   final SlotStatus status;
   final String? borrowerId;
+  final String? borrowerName;
   final DateTime? borrowDate;
   final DateTime? expectedReturnDate;
   final DateTime? reservationDate;
   final String? reservedById;
+  final String? reservedByName;
 
   GameSlot({
     required this.platform,
     required this.accountType,
     required this.status,
     this.borrowerId,
+    this.borrowerName,
     this.borrowDate,
     this.expectedReturnDate,
     this.reservationDate,
     this.reservedById,
+    this.reservedByName,
   });
+
+  // Generate slot key for Firebase
+  String get slotKey => '${platform.value}_${accountType.value}';
+
+  // Check if slot is available for specific user
+  bool isAvailableFor(String userId) {
+    if (status == SlotStatus.available) return true;
+    if (status == SlotStatus.reserved && reservedById == userId) return true;
+    return false;
+  }
+
+  // Calculate days remaining for borrow
+  int? get daysRemaining {
+    if (expectedReturnDate == null) return null;
+    return expectedReturnDate!.difference(DateTime.now()).inDays;
+  }
+
+  // Check if overdue
+  bool get isOverdue {
+    if (expectedReturnDate == null) return false;
+    return DateTime.now().isAfter(expectedReturnDate!);
+  }
 
   Map<String, dynamic> toMap() {
     return {
-      'platform': platform.value,  // FIXED: Using .value instead of .name
-      'accountType': accountType.value,  // FIXED: Using .value instead of .name
-      'status': status.value,  // FIXED: Using .value instead of .name
+      'platform': platform.value,
+      'accountType': accountType.value,
+      'status': status.value,
       'borrowerId': borrowerId,
+      'borrowerName': borrowerName,
       'borrowDate': borrowDate != null ? Timestamp.fromDate(borrowDate!) : null,
       'expectedReturnDate': expectedReturnDate != null
           ? Timestamp.fromDate(expectedReturnDate!) : null,
       'reservationDate': reservationDate != null
           ? Timestamp.fromDate(reservationDate!) : null,
       'reservedById': reservedById,
+      'reservedByName': reservedByName,
     };
   }
 
@@ -221,6 +284,7 @@ class GameSlot {
       accountType: AccountType.fromString(map['accountType'] ?? 'primary'),
       status: SlotStatus.fromString(map['status'] ?? 'notAvailable'),
       borrowerId: map['borrowerId'],
+      borrowerName: map['borrowerName'],
       borrowDate: map['borrowDate'] != null
           ? (map['borrowDate'] as Timestamp).toDate() : null,
       expectedReturnDate: map['expectedReturnDate'] != null
@@ -228,6 +292,7 @@ class GameSlot {
       reservationDate: map['reservationDate'] != null
           ? (map['reservationDate'] as Timestamp).toDate() : null,
       reservedById: map['reservedById'],
+      reservedByName: map['reservedByName'],
     );
   }
 
@@ -236,33 +301,39 @@ class GameSlot {
     AccountType? accountType,
     SlotStatus? status,
     String? borrowerId,
+    String? borrowerName,
     DateTime? borrowDate,
     DateTime? expectedReturnDate,
     DateTime? reservationDate,
     String? reservedById,
+    String? reservedByName,
   }) {
     return GameSlot(
       platform: platform ?? this.platform,
       accountType: accountType ?? this.accountType,
       status: status ?? this.status,
       borrowerId: borrowerId ?? this.borrowerId,
+      borrowerName: borrowerName ?? this.borrowerName,
       borrowDate: borrowDate ?? this.borrowDate,
       expectedReturnDate: expectedReturnDate ?? this.expectedReturnDate,
       reservationDate: reservationDate ?? this.reservationDate,
       reservedById: reservedById ?? this.reservedById,
+      reservedByName: reservedByName ?? this.reservedByName,
     );
   }
 }
 
+// MAIN CLASS - KEEPING THE NAME GameAccount FOR BACKWARD COMPATIBILITY
+// This represents a game title that can have multiple accounts
 class GameAccount {
   // Basic Info
-  final String accountId;
+  final String accountId; // This is actually the game ID
   final String title;
   final List<String> includedTitles; // For accounts with multiple games
   final String? coverImageUrl;
   final String? description;
 
-  // Account Details
+  // Account Details (for backward compatibility - will use first account's data)
   final String email;
   final String password;
   final String? edition;
@@ -304,6 +375,11 @@ class GameAccount {
   final List<String>? fundContributors;
   final Map<String, double>? contributorShares;
 
+  // Multiple accounts support (NEW)
+  final List<Map<String, dynamic>>? accounts; // Array of accounts for same game
+  final int? totalAccounts;
+  final int? availableAccounts;
+
   // Metadata
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -343,6 +419,9 @@ class GameAccount {
     this.nextShareValue,
     this.fundContributors,
     this.contributorShares,
+    this.accounts,
+    this.totalAccounts,
+    this.availableAccounts,
     required this.createdAt,
     required this.updatedAt,
     this.additionalData,
@@ -351,9 +430,9 @@ class GameAccount {
   // Calculate profit
   double get profit => totalRevenues - totalCost;
 
-  // Check if available for borrowing - FIXED
+  // Check if available for borrowing
   bool isAvailableForBorrowing(Platform platform, AccountType accountType) {
-    final slotKey = '${platform.value}_${accountType.value}';  // FIXED: Using .value
+    final slotKey = '${platform.value}_${accountType.value}';
     final slot = slots[slotKey];
     return slot != null && slot.status == SlotStatus.available;
   }
@@ -369,16 +448,96 @@ class GameAccount {
   // Check if PS Plus account
   bool get isPSPlusAccount => sharingOptions.contains(AccountType.psPlus);
 
-  // Factory constructor from Firestore
+  // Check if has any available slot
+  bool get hasAvailableSlots => availableSlotsCount > 0;
+
+  // Factory constructor from Firestore - UPDATED to handle multiple accounts
   factory GameAccount.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-    // Parse slots
-    Map<String, GameSlot> parsedSlots = {};
-    if (data['slots'] != null) {
-      (data['slots'] as Map<String, dynamic>).forEach((key, value) {
-        parsedSlots[key] = GameSlot.fromMap(value);
-      });
+    // Handle multiple accounts structure (NEW)
+    List<Map<String, dynamic>>? accountsList;
+    Map<String, GameSlot> allSlots = {};
+    String firstEmail = '';
+    String firstPassword = '';
+    String? firstEdition;
+    String? firstRegion;
+    String firstContributorId = '';
+    String firstContributorName = '';
+    List<Platform> allPlatforms = [];
+    List<AccountType> allSharingOptions = [];
+
+    if (data['accounts'] != null && data['accounts'] is List) {
+      accountsList = List<Map<String, dynamic>>.from(data['accounts']);
+
+      // Process all accounts to collect slots and data
+      for (var account in accountsList) {
+        // Get first account's credentials for backward compatibility
+        if (firstEmail.isEmpty) {
+          firstEmail = account['credentials']?['email'] ?? '';
+          firstPassword = account['credentials']?['password'] ?? '';
+          firstEdition = account['edition'];
+          firstRegion = account['region'];
+          firstContributorId = account['contributorId'] ?? '';
+          firstContributorName = account['contributorName'] ?? '';
+        }
+
+        // Collect all platforms
+        if (account['platforms'] != null) {
+          for (var p in account['platforms']) {
+            final platform = Platform.fromString(p);
+            if (!allPlatforms.contains(platform)) {
+              allPlatforms.add(platform);
+            }
+          }
+        }
+
+        // Collect all sharing options
+        if (account['sharingOptions'] != null) {
+          for (var a in account['sharingOptions']) {
+            final accountType = AccountType.fromString(a);
+            if (!allSharingOptions.contains(accountType)) {
+              allSharingOptions.add(accountType);
+            }
+          }
+        }
+
+        // Parse slots from each account
+        if (account['slots'] != null) {
+          (account['slots'] as Map<String, dynamic>).forEach((key, value) {
+            allSlots[key] = GameSlot.fromMap(value);
+          });
+        }
+      }
+    } else {
+      // Old structure - single account (backward compatibility)
+      firstEmail = data['email'] ?? '';
+      firstPassword = data['password'] ?? '';
+      firstEdition = data['edition'];
+      firstRegion = data['region'];
+      firstContributorId = data['contributorId'] ?? '';
+      firstContributorName = data['contributorName'] ?? '';
+
+      // Parse platforms
+      if (data['supportedPlatforms'] != null) {
+        allPlatforms = (data['supportedPlatforms'] as List<dynamic>)
+            .map((e) => Platform.fromString(e.toString()))
+            .toList();
+      }
+
+      // Parse sharing options
+      if (data['sharingOptions'] != null) {
+        allSharingOptions = (data['sharingOptions'] as List<dynamic>)
+            .map((e) => AccountType.fromString(e.toString()))
+            .toList();
+      }
+
+      // Parse slots
+      if (data['slots'] != null) {
+        (data['slots'] as Map<String, dynamic>).forEach((key, value) {
+          allSlots[key] = GameSlot.fromMap(value);
+        });
+      }
     }
 
     return GameAccount(
@@ -387,14 +546,14 @@ class GameAccount {
       includedTitles: List<String>.from(data['includedTitles'] ?? []),
       coverImageUrl: data['coverImageUrl'],
       description: data['description'],
-      email: data['email'] ?? '',
-      password: data['password'] ?? '',
-      edition: data['edition'],
-      region: data['region'],
+      email: firstEmail,
+      password: firstPassword,
+      edition: firstEdition,
+      region: firstRegion,
       expiryDate: data['expiryDate'] != null
           ? (data['expiryDate'] as Timestamp).toDate() : null,
-      contributorId: data['contributorId'] ?? '',
-      contributorName: data['contributorName'] ?? '',
+      contributorId: firstContributorId,
+      contributorName: firstContributorName,
       lenderTier: LenderTier.fromString(data['lenderTier'] ?? 'nonMember'),
       dateAdded: data['dateAdded'] != null
           ? (data['dateAdded'] as Timestamp).toDate()
@@ -402,15 +561,11 @@ class GameAccount {
       dateRemoved: data['dateRemoved'] != null
           ? (data['dateRemoved'] as Timestamp).toDate() : null,
       isActive: data['isActive'] ?? true,
-      supportedPlatforms: (data['supportedPlatforms'] as List<dynamic>?)
-          ?.map((e) => Platform.fromString(e.toString()))
-          .toList() ?? [],
-      sharingOptions: (data['sharingOptions'] as List<dynamic>?)
-          ?.map((e) => AccountType.fromString(e.toString()))
-          .toList() ?? [],
-      slots: parsedSlots,
-      gameValue: (data['gameValue'] ?? 0).toDouble(),
-      totalCost: (data['totalCost'] ?? 0).toDouble(),
+      supportedPlatforms: allPlatforms,
+      sharingOptions: allSharingOptions,
+      slots: allSlots,
+      gameValue: (data['gameValue'] ?? data['totalValue'] ?? 0).toDouble(),
+      totalCost: (data['totalCost'] ?? data['totalValue'] ?? 0).toDouble(),
       totalRevenues: (data['totalRevenues'] ?? 0).toDouble(),
       borrowRevenue: (data['borrowRevenue'] ?? 0).toDouble(),
       sellRevenue: (data['sellRevenue'] ?? 0).toDouble(),
@@ -425,6 +580,9 @@ class GameAccount {
           ? List<String>.from(data['fundContributors']) : null,
       contributorShares: data['contributorShares'] != null
           ? Map<String, double>.from(data['contributorShares']) : null,
+      accounts: accountsList,
+      totalAccounts: data['totalAccounts'] ?? accountsList?.length ?? 1,
+      availableAccounts: data['availableAccounts'] ?? 0,
       createdAt: data['createdAt'] != null
           ? (data['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
@@ -435,7 +593,7 @@ class GameAccount {
     );
   }
 
-  // Convert to Firestore document - FIXED
+  // Convert to Firestore document
   Map<String, dynamic> toFirestore() {
     // Convert slots to map
     Map<String, dynamic> slotsMap = {};
@@ -455,12 +613,12 @@ class GameAccount {
       'expiryDate': expiryDate != null ? Timestamp.fromDate(expiryDate!) : null,
       'contributorId': contributorId,
       'contributorName': contributorName,
-      'lenderTier': lenderTier.value,  // FIXED: Using .value instead of .name
+      'lenderTier': lenderTier.value,
       'dateAdded': Timestamp.fromDate(dateAdded),
       'dateRemoved': dateRemoved != null ? Timestamp.fromDate(dateRemoved!) : null,
       'isActive': isActive,
-      'supportedPlatforms': supportedPlatforms.map((e) => e.value).toList(),  // FIXED
-      'sharingOptions': sharingOptions.map((e) => e.value).toList(),  // FIXED
+      'supportedPlatforms': supportedPlatforms.map((e) => e.value).toList(),
+      'sharingOptions': sharingOptions.map((e) => e.value).toList(),
       'slots': slotsMap,
       'gameValue': gameValue,
       'totalCost': totalCost,
@@ -476,6 +634,9 @@ class GameAccount {
       'nextShareValue': nextShareValue,
       'fundContributors': fundContributors,
       'contributorShares': contributorShares,
+      'accounts': accounts,
+      'totalAccounts': totalAccounts,
+      'availableAccounts': availableAccounts,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': Timestamp.fromDate(updatedAt),
       'additionalData': additionalData,
@@ -517,6 +678,9 @@ class GameAccount {
     double? nextShareValue,
     List<String>? fundContributors,
     Map<String, double>? contributorShares,
+    List<Map<String, dynamic>>? accounts,
+    int? totalAccounts,
+    int? availableAccounts,
     DateTime? createdAt,
     DateTime? updatedAt,
     Map<String, dynamic>? additionalData,
@@ -555,9 +719,15 @@ class GameAccount {
       nextShareValue: nextShareValue ?? this.nextShareValue,
       fundContributors: fundContributors ?? this.fundContributors,
       contributorShares: contributorShares ?? this.contributorShares,
+      accounts: accounts ?? this.accounts,
+      totalAccounts: totalAccounts ?? this.totalAccounts,
+      availableAccounts: availableAccounts ?? this.availableAccounts,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       additionalData: additionalData ?? this.additionalData,
     );
   }
 }
+
+// Alias for backward compatibility
+typedef Game = GameAccount;
