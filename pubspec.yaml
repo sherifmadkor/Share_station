@@ -37,7 +37,7 @@ dependencies:
   cloud_firestore: ^5.0.2
   firebase_storage: ^12.1.1
   cloud_functions: ^5.0.2
-
+  percent_indicator: ^4.2.3
   # State Management
   provider: ^6.1.1
 

@@ -162,7 +162,7 @@ class GameProvider extends ChangeNotifier {
         accountId: availableAccountId,
         platform: platform,
         accountType: accountType,
-        borrowValue: game.gameValue, // Changed from gameValue to borrowValue
+        borrowValue: game.gameValue, memberId: '', // Changed from gameValue to borrowValue
       );
     } catch (e) {
       print('Error submitting borrow request: $e');

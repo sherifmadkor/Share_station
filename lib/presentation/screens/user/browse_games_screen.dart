@@ -9,12 +9,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/game_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/game_model.dart' as game_models;
 import '../../../data/models/user_model.dart' hide Platform;
 import '../../widgets/custom_loading.dart';
-import '../../widgets/game/game_details_modal.dart';
 import 'borrow_game_screen.dart';
 
 class BrowseGamesScreen extends StatefulWidget {
@@ -213,10 +211,10 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
           Container(
             padding: EdgeInsets.all(16.w),
             decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withOpacity(0.1),
+              color: AppTheme.primaryColor.withAlpha(26),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withAlpha(13),
                   blurRadius: 4,
                   offset: Offset(0, 2),
                 ),
@@ -279,7 +277,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
               margin: EdgeInsets.symmetric(horizontal: 16.w),
               padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
               decoration: BoxDecoration(
-                color: _getCategoryColor(_selectedCategory!).withOpacity(0.1),
+                color: _getCategoryColor(_selectedCategory!).withAlpha(26),
                 borderRadius: BorderRadius.circular(8.r),
                 border: Border.all(color: _getCategoryColor(_selectedCategory!)),
               ),
@@ -343,7 +341,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                   margin: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
                   padding: EdgeInsets.all(12.w),
                   decoration: BoxDecoration(
-                    color: AppTheme.warningColor.withOpacity(0.1),
+                    color: AppTheme.warningColor.withAlpha(26),
                     borderRadius: BorderRadius.circular(8.r),
                     border: Border.all(color: AppTheme.warningColor),
                   ),
@@ -374,7 +372,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                                 nextWindowTime,
                                 style: TextStyle(
                                   fontSize: 12.sp,
-                                  color: AppTheme.warningColor.withOpacity(0.8),
+                                  color: AppTheme.warningColor.withAlpha(204),
                                 ),
                               ),
                           ],
@@ -529,7 +527,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
           borderRadius: BorderRadius.circular(16.r),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withAlpha(26),
               blurRadius: 8,
               offset: Offset(0, 4),
             ),
@@ -568,7 +566,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                         ),
                       ),
                       errorWidget: (context, url, error) => Container(
-                        color: AppTheme.primaryColor.withOpacity(0.1),
+                        color: AppTheme.primaryColor.withAlpha(26),
                         child: Center(
                           child: Icon(
                             FontAwesomeIcons.gamepad,
@@ -579,7 +577,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                       ),
                     )
                         : Container(
-                      color: AppTheme.primaryColor.withOpacity(0.1),
+                      color: AppTheme.primaryColor.withAlpha(26),
                       child: Center(
                         child: Icon(
                           FontAwesomeIcons.gamepad,
@@ -598,11 +596,11 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                   child: Container(
                     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                     decoration: BoxDecoration(
-                      color: categoryColor.withOpacity(0.95),
+                      color: categoryColor.withAlpha(242),
                       borderRadius: BorderRadius.circular(6.r),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withAlpha(51),
                           blurRadius: 4,
                           offset: Offset(0, 2),
                         ),
@@ -627,12 +625,12 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
                     decoration: BoxDecoration(
                       color: isAvailable
-                          ? AppTheme.successColor.withOpacity(0.95)
-                          : AppTheme.errorColor.withOpacity(0.95),
+                          ? AppTheme.successColor.withAlpha(242)
+                          : AppTheme.errorColor.withAlpha(242),
                       borderRadius: BorderRadius.circular(6.r),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withAlpha(51),
                           blurRadius: 4,
                           offset: Offset(0, 2),
                         ),
@@ -705,7 +703,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                               Container(
                                 padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.infoColor.withOpacity(0.1),
+                                  color: AppTheme.infoColor.withAlpha(26),
                                   borderRadius: BorderRadius.circular(4.r),
                                 ),
                                 child: Text(
@@ -921,7 +919,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
         decoration: BoxDecoration(
-          color: isSelected ? color : color.withOpacity(0.1),
+          color: isSelected ? color : color.withAlpha(26),
           borderRadius: BorderRadius.circular(20.r),
           border: Border.all(
             color: color,
@@ -941,224 +939,244 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
   }
 
   void _showGameDetails(game_models.GameAccount game) {
+    final isArabic = Provider.of<AppProvider>(context, listen: false).isArabic;
+    final isDarkMode = Provider.of<AppProvider>(context, listen: false).isDarkMode;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _buildGameDetailsModal(game),
-    ).then((result) {
-      if (result == true) {
-        // Refresh the games list if a borrow was made
-        _loadGames();
-      }
-    });
-  }
+      builder: (context) => StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('settings')
+            .doc('borrow_window')
+            .snapshots(),
+        builder: (context, windowSnapshot) {
+          final isWindowOpen = windowSnapshot.data?.data() != null
+              ? (windowSnapshot.data!.data() as Map<String, dynamic>)['isOpen'] ?? false
+              : false;
 
-  Widget _buildGameDetailsModal(game_models.GameAccount game) {
-    final appProvider = Provider.of<AppProvider>(context);
-    final authProvider = Provider.of<AuthProvider>(context);
-    final isArabic = appProvider.isArabic;
-    final isDarkMode = appProvider.isDarkMode;
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
-          ),
-          child: Column(
-            children: [
-              // Handle bar
-              Container(
-                margin: EdgeInsets.only(top: 12.h),
-                width: 50.w,
-                height: 5.h,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(10.r),
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            decoration: BoxDecoration(
+              color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
+            ),
+            child: Column(
+              children: [
+                // Handle bar
+                Container(
+                  margin: EdgeInsets.only(top: 12.h),
+                  width: 40.w,
+                  height: 4.h,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withAlpha(77),
+                    borderRadius: BorderRadius.circular(2.r),
+                  ),
                 ),
-              ),
-              // Content
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: EdgeInsets.all(20.w),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Game Title
-                      Text(
-                        game.title,
-                        style: TextStyle(
-                          fontSize: 24.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 16.h),
 
-                      // Game Info
-                      Row(
-                        children: [
-                          // Value
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.all(20.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Cover Image
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12.r),
+                          child: CachedNetworkImage(
+                            imageUrl: game.coverImageUrl ?? '',
+                            height: 200.h,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => Container(
+                              color: Colors.grey.withAlpha(77),
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                            errorWidget: (context, url, error) => Container(
+                              color: Colors.grey.withAlpha(77),
+                              child: Icon(
+                                FontAwesomeIcons.gamepad,
+                                size: 50.sp,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        SizedBox(height: 16.h),
+
+                        // Title
+                        Text(
+                          game.title,
+                          style: TextStyle(
+                            fontSize: 24.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+
+                        SizedBox(height: 8.h),
+
+                        // Game Value and Category
+                        Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryColor.withAlpha(26),
+                                borderRadius: BorderRadius.circular(8.r),
+                              ),
+                              child: Text(
+                                '${game.gameValue.toStringAsFixed(0)} LE',
+                                style: TextStyle(
+                                  fontSize: 16.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primaryColor,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 8.w),
+                            // Lender Tier
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                              decoration: BoxDecoration(
+                                color: _getCategoryColor(game.lenderTier).withAlpha(26),
+                                borderRadius: BorderRadius.circular(8.r),
+                              ),
+                              child: Text(
+                                _getCategoryLabel(game.lenderTier, isArabic),
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: _getCategoryColor(game.lenderTier),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        SizedBox(height: 16.h),
+
+                        // Available Slots
+                        Text(
+                          isArabic ? 'النسخ المتاحة' : 'Available Slots',
+                          style: TextStyle(
+                            fontSize: 18.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 12.h),
+
+                        // Slots Grid
+                        _buildSlotsGrid(game),
+
+                        SizedBox(height: 24.h),
+
+                        // Borrow Window Status Message
+                        if (!isWindowOpen && !authProvider.isAdmin)
                           Container(
-                            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                            margin: EdgeInsets.only(bottom: 16.h),
+                            padding: EdgeInsets.all(12.w),
                             decoration: BoxDecoration(
-                              color: AppTheme.primaryColor.withOpacity(0.1),
+                              color: AppTheme.errorColor.withAlpha(26),
                               borderRadius: BorderRadius.circular(8.r),
+                              border: Border.all(color: AppTheme.errorColor.withAlpha(77)),
                             ),
                             child: Row(
                               children: [
-                                Icon(Icons.attach_money, size: 16.sp, color: AppTheme.primaryColor),
-                                Text(
-                                  '${game.gameValue.toStringAsFixed(0)} LE',
-                                  style: TextStyle(
-                                    fontSize: 14.sp,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppTheme.primaryColor,
+                                Icon(Icons.lock, color: AppTheme.errorColor, size: 20.sp),
+                                SizedBox(width: 8.w),
+                                Expanded(
+                                  child: Text(
+                                    isArabic
+                                        ? 'نافذة الاستعارة مغلقة. يمكن الاستعارة أيام الخميس فقط.'
+                                        : 'Borrow window is closed. Borrowing is available on Thursdays only.',
+                                    style: TextStyle(
+                                      fontSize: 14.sp,
+                                      color: AppTheme.errorColor,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          SizedBox(width: 8.w),
-                          // Lender Tier
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-                            decoration: BoxDecoration(
-                              color: _getCategoryColor(game.lenderTier).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8.r),
-                            ),
-                            child: Text(
-                              _getCategoryLabel(game.lenderTier, isArabic),
-                              style: TextStyle(
-                                fontSize: 14.sp,
-                                fontWeight: FontWeight.bold,
-                                color: _getCategoryColor(game.lenderTier),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
 
-                      SizedBox(height: 16.h),
-
-                      // Available Slots
-                      Text(
-                        isArabic ? 'النسخ المتاحة' : 'Available Slots',
-                        style: TextStyle(
-                          fontSize: 18.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 12.h),
-
-                      // Slots Grid
-                      _buildSlotsGrid(game),
-
-                      SizedBox(height: 24.h),
-
-                      // Borrow Button
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56.h,
-                        child: ElevatedButton.icon(
-                          onPressed: _getAvailableSlots(game) > 0
-                              ? () {
-                            Navigator.pop(context);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => BorrowGameScreen(game: game),
-                              ),
-                            ).then((result) {
-                              if (result == true) {
-                                _loadGames();
-                              }
-                            });
-                          }
-                              : null,
-                          icon: Icon(FontAwesomeIcons.gamepad, color: Colors.white),
-                          label: Text(
-                            _getAvailableSlots(game) > 0
-                                ? (isArabic ? 'طلب استعارة' : 'Request Borrow')
-                                : (isArabic ? 'غير متاح' : 'Not Available'),
-                            style: TextStyle(
-                              fontSize: 18.sp,
-                              fontWeight: FontWeight.bold,
+                        // Borrow Button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56.h,
+                          child: ElevatedButton.icon(
+                            onPressed: (_getAvailableSlots(game) > 0 && (isWindowOpen || authProvider.isAdmin))
+                                ? () {
+                              Navigator.pop(context);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => BorrowGameScreen(game: game),
+                                ),
+                              ).then((result) {
+                                if (result == true) {
+                                  _loadGames();
+                                }
+                              });
+                            }
+                                : null,
+                            icon: Icon(
+                              isWindowOpen || authProvider.isAdmin
+                                  ? FontAwesomeIcons.gamepad
+                                  : Icons.lock,
                               color: Colors.white,
                             ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryColor,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12.r),
-                            ),
-                            disabledBackgroundColor: Colors.grey,
-                          ),
-                        ),
-                      ),
-
-                      // Contributor Info
-                      if (game.contributorName.isNotEmpty) ...[
-                        SizedBox(height: 16.h),
-                        Divider(),
-                        SizedBox(height: 16.h),
-                        Row(
-                          children: [
-                            Icon(Icons.person_outline, size: 20.sp, color: Colors.grey),
-                            SizedBox(width: 8.w),
-                            Text(
-                              '${isArabic ? "المساهم:" : "Contributor:"} ${game.contributorName}',
+                            label: Text(
+                              !isWindowOpen && !authProvider.isAdmin
+                                  ? (isArabic ? 'نافذة الاستعارة مغلقة' : 'Borrow Window Closed')
+                                  : _getAvailableSlots(game) > 0
+                                  ? (isArabic ? 'طلب استعارة' : 'Request Borrow')
+                                  : (isArabic ? 'غير متاح' : 'Not Available'),
                               style: TextStyle(
-                                fontSize: 14.sp,
-                                color: Colors.grey[600],
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
                               ),
                             ),
-                          ],
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: (!isWindowOpen && !authProvider.isAdmin)
+                                  ? Colors.grey
+                                  : _getAvailableSlots(game) > 0
+                                  ? AppTheme.primaryColor
+                                  : Colors.grey,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12.r),
+                              ),
+                              elevation: 2,
+                            ),
+                          ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
   Widget _buildSlotsGrid(game_models.GameAccount game) {
     final List<Widget> slotWidgets = [];
 
-    if (game.accounts != null && game.accounts!.isNotEmpty) {
-      // New structure with multiple accounts
-      for (var account in game.accounts!) {
-        final slots = account['slots'] as Map<String, dynamic>?;
-        if (slots != null) {
-          slots.forEach((key, slotData) {
-            slotWidgets.add(_buildSlotChip(
-              platform: slotData['platform'],
-              accountType: slotData['accountType'],
-              status: slotData['status'],
-            ));
-          });
-        }
-      }
-    } else {
-      // Old structure
-      game.slots.forEach((key, slot) {
-        slotWidgets.add(_buildSlotChip(
-          platform: slot.platform.value,
-          accountType: slot.accountType.value,
-          status: slot.status.value,
-        ));
-      });
-    }
+    // Use the processed slots from the GameAccount model
+    // The GameAccount.fromFirestore method already processes all slots properly
+    game.slots.forEach((key, slot) {
+      slotWidgets.add(_buildSlotChip(
+        platform: slot.platform.displayName,
+        accountType: slot.accountType.displayName,
+        status: slot.status.value,
+      ));
+    });
 
     return Wrap(
       spacing: 8.w,
@@ -1178,7 +1196,7 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withAlpha(26),
         borderRadius: BorderRadius.circular(8.r),
         border: Border.all(color: color),
       ),

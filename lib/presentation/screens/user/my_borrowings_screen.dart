@@ -56,6 +56,16 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
           controller: _tabController,
           indicatorColor: Colors.white,
           indicatorWeight: 3,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          labelStyle: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14.sp,
+          ),
+          unselectedLabelStyle: TextStyle(
+            fontWeight: FontWeight.normal,
+            fontSize: 14.sp,
+          ),
           tabs: [
             Tab(text: isArabic ? 'النشطة' : 'Active'),
             Tab(text: isArabic ? 'المعلقة' : 'Pending'),
@@ -94,7 +104,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
           .collection('borrow_requests')
-          .where('borrowerId', isEqualTo: user.uid)
+          .where('userId', isEqualTo: user.uid)
           .where('status', isEqualTo: 'approved')
           .snapshots(),
       builder: (context, snapshot) {
@@ -103,6 +113,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
         }
 
         if (snapshot.hasError) {
+          print('Active borrowings error: ${snapshot.error}');
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -117,12 +128,35 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                   isArabic ? 'خطأ في تحميل البيانات' : 'Error loading data',
                   style: TextStyle(color: AppTheme.errorColor),
                 ),
+                SizedBox(height: 8.h),
+                Text(
+                  '${snapshot.error}',
+                  style: TextStyle(
+                    color: AppTheme.errorColor,
+                    fontSize: 12.sp,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 16.h),
+                ElevatedButton(
+                  onPressed: () => setState(() {}),
+                  child: Text(isArabic ? 'إعادة المحاولة' : 'Retry'),
+                ),
               ],
             ),
           );
         }
 
-        final borrows = snapshot.data?.docs ?? [];
+        final allBorrows = snapshot.data?.docs ?? [];
+        
+        // Sort by requestDate or approvedAt in descending order (newest first)
+        final borrows = allBorrows..sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          final dateA = (dataA['approvedAt'] as Timestamp?)?.toDate() ?? (dataA['requestDate'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          final dateB = (dataB['approvedAt'] as Timestamp?)?.toDate() ?? (dataB['requestDate'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          return dateB.compareTo(dateA);
+        });
 
         if (borrows.isEmpty) {
           return Center(
@@ -132,7 +166,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                 Icon(
                   FontAwesomeIcons.gamepad,
                   size: 64.sp,
-                  color: Colors.grey.withOpacity(0.5),
+                  color: Colors.grey.withAlpha(128),
                 ),
                 SizedBox(height: 16.h),
                 Text(
@@ -149,7 +183,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                       : 'Games you are currently borrowing will appear here',
                   style: TextStyle(
                     fontSize: 14.sp,
-                    color: Colors.grey.withOpacity(0.7),
+                    color: Colors.grey.withAlpha(179),
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -164,7 +198,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
           itemBuilder: (context, index) {
             final doc = borrows[index];
             final data = doc.data() as Map<String, dynamic>;
-            final borrowDate = (data['approvedAt'] as Timestamp?)?.toDate();
+            final borrowDate = (data['approvedAt'] as Timestamp?)?.toDate() ?? (data['requestDate'] as Timestamp?)?.toDate();
             final daysRemaining = 30 - (borrowDate != null
                 ? DateTime.now().difference(borrowDate).inDays
                 : 0);
@@ -181,7 +215,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                   height: 60.w,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8.r),
-                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    color: AppTheme.primaryColor.withAlpha(26),
                   ),
                   child: Icon(
                     FontAwesomeIcons.gamepad,
@@ -290,7 +324,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
           .collection('borrow_requests')
-          .where('borrowerId', isEqualTo: user.uid)
+          .where('userId', isEqualTo: user.uid)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -324,12 +358,18 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
           );
         }
 
-        // Filter for pending and queued status in memory
+        // Filter for pending and queued status in memory, then sort
         final allRequests = snapshot.data?.docs ?? [];
         final pendingRequests = allRequests.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           return data['status'] == 'pending' || data['status'] == 'queued';
-        }).toList();
+        }).toList()..sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          final dateA = (dataA['requestDate'] as Timestamp?)?.toDate() ?? (dataA['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          final dateB = (dataB['requestDate'] as Timestamp?)?.toDate() ?? (dataB['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          return dateB.compareTo(dateA);
+        });
 
         if (pendingRequests.isEmpty) {
           return Center(
@@ -339,7 +379,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                 Icon(
                   FontAwesomeIcons.clock,
                   size: 64.sp,
-                  color: Colors.grey.withOpacity(0.5),
+                  color: Colors.grey.withAlpha(128),
                 ),
                 SizedBox(height: 16.h),
                 Text(
@@ -356,7 +396,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                       : 'Your borrow requests will appear here',
                   style: TextStyle(
                     fontSize: 14.sp,
-                    color: Colors.grey.withOpacity(0.7),
+                    color: Colors.grey.withAlpha(179),
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -371,7 +411,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
           itemBuilder: (context, index) {
             final doc = pendingRequests[index];
             final data = doc.data() as Map<String, dynamic>;
-            final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+            final createdAt = (data['requestDate'] as Timestamp?)?.toDate() ?? (data['createdAt'] as Timestamp?)?.toDate();
             final isQueued = data['status'] == 'queued';
 
             return Card(
@@ -403,8 +443,8 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                           ),
                           decoration: BoxDecoration(
                             color: isQueued
-                                ? Colors.orange.withOpacity(0.2)
-                                : AppTheme.warningColor.withOpacity(0.2),
+                                ? Colors.orange.withAlpha(51)
+                                : AppTheme.warningColor.withAlpha(51),
                             borderRadius: BorderRadius.circular(8.r),
                           ),
                           child: Text(
@@ -494,7 +534,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
           .collection('borrow_requests')
-          .where('borrowerId', isEqualTo: user.uid)
+          .where('userId', isEqualTo: user.uid)
           .where('status', isEqualTo: 'returned')
           .snapshots(),
       builder: (context, snapshot) {
@@ -502,7 +542,16 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
           return const Center(child: CircularProgressIndicator());
         }
 
-        final history = snapshot.data?.docs ?? [];
+        final allHistory = snapshot.data?.docs ?? [];
+        
+        // Sort by returnedAt or requestDate in descending order (newest first)
+        final history = allHistory..sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          final dateA = (dataA['returnedAt'] as Timestamp?)?.toDate() ?? (dataA['requestDate'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          final dateB = (dataB['returnedAt'] as Timestamp?)?.toDate() ?? (dataB['requestDate'] as Timestamp?)?.toDate() ?? DateTime(2020);
+          return dateB.compareTo(dateA);
+        });
 
         if (history.isEmpty) {
           return Center(
@@ -512,7 +561,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                 Icon(
                   FontAwesomeIcons.clockRotateLeft,
                   size: 64.sp,
-                  color: Colors.grey.withOpacity(0.5),
+                  color: Colors.grey.withAlpha(128),
                 ),
                 SizedBox(height: 16.h),
                 Text(
@@ -529,7 +578,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                       : 'Your past borrowing history will appear here',
                   style: TextStyle(
                     fontSize: 14.sp,
-                    color: Colors.grey.withOpacity(0.7),
+                    color: Colors.grey.withAlpha(179),
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -557,7 +606,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                 borderRadius: BorderRadius.circular(12.r),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withAlpha(13),
                     blurRadius: 5,
                     offset: const Offset(0, 2),
                   ),
@@ -582,7 +631,7 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
                           vertical: 4.h,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.successColor.withOpacity(0.2),
+                          color: AppTheme.successColor.withAlpha(51),
                           borderRadius: BorderRadius.circular(6.r),
                         ),
                         child: Text(
@@ -735,8 +784,8 @@ class _MyBorrowingsScreenState extends State<MyBorrowingsScreen>
         'borrowId': borrowId,
         'gameId': borrowData['gameId'],
         'gameTitle': borrowData['gameTitle'],
-        'borrowerId': borrowData['borrowerId'],
-        'borrowerName': borrowData['borrowerName'],
+        'userId': borrowData['userId'],
+        'userName': borrowData['userName'],
         'platform': borrowData['platform'],
         'accountType': borrowData['accountType'],
         'borrowValue': borrowData['borrowValue'],

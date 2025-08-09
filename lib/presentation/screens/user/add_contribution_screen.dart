@@ -35,7 +35,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   final _gameDescriptionController = TextEditingController();
   final _accountEmailController = TextEditingController();
   final _accountPasswordController = TextEditingController();
-  final _gameValueController = TextEditingController(text: '150'); // Default value
+  final _gameValueController = TextEditingController(text: '500'); // Default value
 
   // --- PS Plus Contribution Controllers ---
   final _psPlusAccountEmailController = TextEditingController();
@@ -49,7 +49,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   List<Map<String, dynamic>> _availableFundGames = [];
 
   // --- Selected Values ---
-  String _selectedEdition = 'standard';
+  String _selectedEdition = 'Standard';
   String _selectedRegion = 'US';
 
   // Using the Platform and AccountType from game_model.dart
@@ -59,16 +59,38 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
   bool _isLoading = false;
 
+  // Game suggestions
+  List<Map<String, dynamic>> _gameSuggestions = [];
+  bool _showSuggestions = false;
+  String? _selectedExistingGameId;
+  Map<String, dynamic>? _selectedExistingGame;
+
+  // Available regions and editions
+  final List<String> _availableRegions = [
+    'US', 'EU', 'UK', 'JP', 'AU', 'CA', 'BR', 'MX', 'RU', 'IN',
+    'KR', 'TW', 'HK', 'SG', 'MENA', 'ZA', 'GLOBAL'
+  ];
+
+  final List<String> _availableEditions = [
+    'Standard', 'Deluxe', 'Ultimate', 'Gold', 'Complete', 'Premium',
+    'Collector\'s', 'Special', 'Anniversary', 'Director\'s Cut',
+    'Game of the Year', 'Definitive', 'Enhanced', 'Remastered'
+  ];
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadAvailableFundGames();
+
+    // Listen to game title changes for suggestions
+    _gameTitleController.addListener(_onGameTitleChanged);
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _gameTitleController.removeListener(_onGameTitleChanged);
     _gameTitleController.dispose();
     _gameDescriptionController.dispose();
     _accountEmailController.dispose();
@@ -78,6 +100,67 @@ class _AddContributionScreenState extends State<AddContributionScreen>
     _psPlusAccountEmailController.dispose();
     _psPlusAccountPasswordController.dispose();
     super.dispose();
+  }
+
+  // Search for existing games as user types
+  void _onGameTitleChanged() async {
+    final query = _gameTitleController.text.trim();
+
+    if (query.isEmpty) {
+      setState(() {
+        _gameSuggestions = [];
+        _showSuggestions = false;
+      });
+      return;
+    }
+
+    if (query.length < 2) return; // Don't search for very short queries
+
+    try {
+      // Search for games that contain the query (case-insensitive)
+      final snapshot = await _firestore
+          .collection('games')
+          .where('title', isGreaterThanOrEqualTo: query)
+          .where('title', isLessThanOrEqualTo: query + '\uf8ff')
+          .limit(5)
+          .get();
+
+      setState(() {
+        _gameSuggestions = snapshot.docs.map((doc) => {
+          'id': doc.id,
+          'title': doc.data()['title'],
+          'coverImageUrl': doc.data()['coverImageUrl'],
+          'gameValue': doc.data()['gameValue'] ?? doc.data()['totalValue'],
+          'accountsCount': (doc.data()['accounts'] as List?)?.length ?? 0,
+        }).toList();
+        _showSuggestions = _gameSuggestions.isNotEmpty;
+      });
+    } catch (e) {
+      print('Error searching games: $e');
+    }
+  }
+
+  // Select an existing game from suggestions
+  void _selectExistingGame(Map<String, dynamic> game) {
+    setState(() {
+      _selectedExistingGameId = game['id'];
+      _selectedExistingGame = game;
+      _gameTitleController.text = game['title'];
+      _gameValueController.text = game['gameValue'].toString();
+      _showSuggestions = false;
+    });
+
+    // Show toast to inform user
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    final isArabic = appProvider.isArabic;
+
+    Fluttertoast.showToast(
+      msg: isArabic
+          ? 'تم اختيار لعبة موجودة. سيتم إضافة حسابك إلى هذه اللعبة.'
+          : 'Existing game selected. Your account will be added to this game.',
+      backgroundColor: AppTheme.infoColor,
+      toastLength: Toast.LENGTH_LONG,
+    );
   }
 
   // Load games available for funding
@@ -134,6 +217,43 @@ class _AddContributionScreenState extends State<AddContributionScreen>
     }
   }
 
+  // Calculate how many slots will be created based on account type
+  Map<String, int> _calculateSlots() {
+    Map<String, int> slots = {};
+
+    for (var accountType in _selectedAccountTypes) {
+      if (accountType == AccountType.full) {
+        // Full account creates multiple slots based on platforms
+        for (var platform in _selectedPlatforms) {
+          if (platform == Platform.ps5) {
+            // PS5 Full = Primary PS5, Secondary PS5, Primary PS4, Secondary PS4
+            slots['PS5 Primary'] = 1;
+            slots['PS5 Secondary'] = 1;
+            slots['PS4 Primary'] = 1;
+            slots['PS4 Secondary'] = 1;
+          } else if (platform == Platform.ps4) {
+            // PS4 Full = Primary PS4, Secondary PS4
+            slots['PS4 Primary'] = 1;
+            slots['PS4 Secondary'] = 1;
+          }
+        }
+      } else {
+        // Primary or Secondary account
+        for (var platform in _selectedPlatforms) {
+          String key = '${platform == Platform.ps5 ? "PS5" : "PS4"} ${accountType == AccountType.primary ? "Primary" : "Secondary"}';
+          slots[key] = 1;
+        }
+      }
+    }
+
+    return slots;
+  }
+
+  // Extension to ContributionService to handle existing games
+  // Add these parameters to submitContribution method:
+  // existingGameId: String? - ID of existing game to add account to
+  // isFullAccount: bool - Whether this is a full account
+
   // Submit game contribution using the contribution service
   Future<void> _submitGameContributionRequest() async {
     if (_gameTitleController.text.isEmpty) {
@@ -161,7 +281,27 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         throw Exception('User not logged in');
       }
 
-      final gameValue = double.tryParse(_gameValueController.text) ?? 150;
+      final gameValue = double.tryParse(_gameValueController.text) ?? 500;
+
+      // Prepare sharing options based on account type selection
+      List<AccountType> actualSharingOptions = [];
+      List<Platform> actualPlatforms = [];
+
+      // Handle Full account special case
+      if (_selectedAccountTypes.contains(AccountType.full)) {
+        if (_selectedPlatforms.contains(Platform.ps5)) {
+          // PS5 Full account includes PS5 and PS4 primary and secondary
+          actualSharingOptions = [AccountType.primary, AccountType.secondary];
+          actualPlatforms = [Platform.ps5, Platform.ps4];
+        } else if (_selectedPlatforms.contains(Platform.ps4)) {
+          // PS4 Full account includes PS4 primary and secondary
+          actualSharingOptions = [AccountType.primary, AccountType.secondary];
+          actualPlatforms = [Platform.ps4];
+        }
+      } else {
+        actualSharingOptions = _selectedAccountTypes;
+        actualPlatforms = _selectedPlatforms;
+      }
 
       // Use the contribution service to submit
       final result = await _contributionService.submitContribution(
@@ -169,19 +309,24 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         userName: currentUser.name,
         gameTitle: _gameTitleController.text.trim(),
         includedTitles: [_gameTitleController.text.trim()],
-        platforms: _selectedPlatforms,
-        sharingOptions: _selectedAccountTypes,
+        platforms: actualPlatforms,
+        sharingOptions: actualSharingOptions,
         gameValue: gameValue,
         email: _accountEmailController.text.trim(),
         password: _accountPasswordController.text,
         edition: _selectedEdition,
         region: _selectedRegion,
         description: _gameDescriptionController.text.trim().isEmpty ? null : _gameDescriptionController.text.trim(),
+        coverImageUrl: _selectedExistingGame?['coverImageUrl'],
+        existingGameId: _selectedExistingGameId, // Pass the existing game ID if selected
+        isFullAccount: _selectedAccountTypes.contains(AccountType.full), // Flag for full account
       );
 
       if (result['success']) {
         Fluttertoast.showToast(
-          msg: 'Game contribution request submitted! Awaiting admin approval.',
+          msg: _selectedExistingGameId != null
+              ? 'Contribution request submitted! Your account will be added to the existing game after approval.'
+              : 'Game contribution request submitted! Awaiting admin approval.',
           backgroundColor: AppTheme.successColor,
           toastLength: Toast.LENGTH_LONG,
         );
@@ -190,7 +335,13 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         _gameDescriptionController.clear();
         _accountEmailController.clear();
         _accountPasswordController.clear();
-        _gameValueController.text = '150';
+        _gameValueController.text = '500';
+        setState(() {
+          _selectedExistingGameId = null;
+          _selectedExistingGame = null;
+          _selectedEdition = 'Standard';
+          _selectedRegion = 'US';
+        });
 
         Navigator.pop(context);
       } else {
@@ -303,7 +454,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         gameValue: 200, // PS Plus has double value
         email: _psPlusAccountEmailController.text.trim(),
         password: _psPlusAccountPasswordController.text,
-        edition: 'premium',
+        edition: 'Premium',
         region: 'GLOBAL',
         description: 'PS Plus subscription account',
       );
@@ -383,6 +534,8 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   }
 
   Widget _buildGameContributionTab(bool isArabic, bool isDarkMode) {
+    final slots = _calculateSlots();
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(16.w),
       child: Column(
@@ -412,16 +565,94 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
           SizedBox(height: 16.h),
 
-          // Game Title
-          TextField(
-            controller: _gameTitleController,
-            decoration: InputDecoration(
-              labelText: isArabic ? 'اسم اللعبة' : 'Game Title',
-              hintText: isArabic ? 'مثال: God of War Ragnarok' : 'e.g., God of War Ragnarok',
-              prefixIcon: Icon(Icons.games, color: AppTheme.primaryColor),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
-            ),
+          // Game Title with autocomplete
+          Stack(
+            children: [
+              TextField(
+                controller: _gameTitleController,
+                decoration: InputDecoration(
+                  labelText: isArabic ? 'اسم اللعبة' : 'Game Title',
+                  hintText: isArabic ? 'ابدأ الكتابة للبحث عن لعبة موجودة' : 'Start typing to search existing games',
+                  prefixIcon: Icon(Icons.games, color: AppTheme.primaryColor),
+                  suffixIcon: _selectedExistingGameId != null
+                      ? Icon(Icons.check_circle, color: AppTheme.successColor)
+                      : null,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
+                ),
+              ),
+              if (_showSuggestions)
+                Positioned(
+                  top: 60.h,
+                  left: 0,
+                  right: 0,
+                  child: Material(
+                    elevation: 4,
+                    borderRadius: BorderRadius.circular(8.r),
+                    child: Container(
+                      constraints: BoxConstraints(maxHeight: 200.h),
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+                        borderRadius: BorderRadius.circular(8.r),
+                      ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _gameSuggestions.length,
+                        itemBuilder: (context, index) {
+                          final game = _gameSuggestions[index];
+                          return ListTile(
+                            leading: game['coverImageUrl'] != null
+                                ? ClipRRect(
+                              borderRadius: BorderRadius.circular(4.r),
+                              child: Image.network(
+                                game['coverImageUrl'],
+                                width: 40.w,
+                                height: 40.w,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(FontAwesomeIcons.gamepad),
+                              ),
+                            )
+                                : Icon(FontAwesomeIcons.gamepad),
+                            title: Text(game['title']),
+                            subtitle: Text('${game['accountsCount']} ${isArabic ? "حساب" : "accounts"}'),
+                            trailing: Chip(
+                              label: Text('${game['gameValue']} LE'),
+                              backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                            ),
+                            onTap: () => _selectExistingGame(game),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
+
+          if (_selectedExistingGameId != null) ...[
+            SizedBox(height: 8.h),
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: AppTheme.successColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8.r),
+                border: Border.all(color: AppTheme.successColor),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, color: AppTheme.successColor, size: 20.sp),
+                  SizedBox(width: 8.w),
+                  Expanded(
+                    child: Text(
+                      isArabic
+                          ? 'سيتم إضافة حسابك إلى هذه اللعبة الموجودة'
+                          : 'Your account will be added to this existing game',
+                      style: TextStyle(fontSize: 13.sp, color: AppTheme.successColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           SizedBox(height: 16.h),
 
@@ -431,7 +662,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
             keyboardType: TextInputType.number,
             decoration: InputDecoration(
               labelText: isArabic ? 'قيمة اللعبة (جنيه)' : 'Game Value (LE)',
-              hintText: isArabic ? 'مثال: 150' : 'e.g., 150',
+              hintText: isArabic ? 'مثال: 500' : 'e.g., 500',
               prefixIcon: Icon(Icons.attach_money, color: AppTheme.primaryColor),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
             ),
@@ -502,10 +733,9 @@ class _AddContributionScreenState extends State<AddContributionScreen>
                 selected: _selectedAccountTypes.contains(AccountType.primary),
                 onSelected: (selected) {
                   setState(() {
+                    _selectedAccountTypes.clear();
                     if (selected) {
                       _selectedAccountTypes.add(AccountType.primary);
-                    } else {
-                      _selectedAccountTypes.remove(AccountType.primary);
                     }
                   });
                 },
@@ -522,10 +752,9 @@ class _AddContributionScreenState extends State<AddContributionScreen>
                 selected: _selectedAccountTypes.contains(AccountType.secondary),
                 onSelected: (selected) {
                   setState(() {
+                    _selectedAccountTypes.clear();
                     if (selected) {
                       _selectedAccountTypes.add(AccountType.secondary);
-                    } else {
-                      _selectedAccountTypes.remove(AccountType.secondary);
                     }
                   });
                 },
@@ -536,22 +765,89 @@ class _AddContributionScreenState extends State<AddContributionScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(isArabic ? 'كامل' : 'Full'),
-                    Text('150%', style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                    Text(isArabic ? 'متعدد' : 'Multiple', style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 selected: _selectedAccountTypes.contains(AccountType.full),
                 onSelected: (selected) {
                   setState(() {
+                    _selectedAccountTypes.clear();
                     if (selected) {
                       _selectedAccountTypes.add(AccountType.full);
-                    } else {
-                      _selectedAccountTypes.remove(AccountType.full);
                     }
                   });
                 },
                 selectedColor: AppTheme.primaryColor.withOpacity(0.2),
               ),
             ],
+          ),
+
+          // Show what slots will be created
+          if (slots.isNotEmpty) ...[
+            SizedBox(height: 12.h),
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: AppTheme.infoColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8.r),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isArabic ? 'سيتم إنشاء الفتحات التالية:' : 'Following slots will be created:',
+                    style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 4.h),
+                  ...slots.entries.map((entry) => Text(
+                    '• ${entry.key}',
+                    style: TextStyle(fontSize: 12.sp),
+                  )),
+                ],
+              ),
+            ),
+          ],
+
+          SizedBox(height: 16.h),
+
+          // Region Dropdown
+          DropdownButtonFormField<String>(
+            value: _selectedRegion,
+            decoration: InputDecoration(
+              labelText: isArabic ? 'المنطقة' : 'Region',
+              prefixIcon: Icon(Icons.language, color: AppTheme.primaryColor),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
+            ),
+            items: _availableRegions.map((region) => DropdownMenuItem(
+              value: region,
+              child: Text(region),
+            )).toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedRegion = value ?? 'US';
+              });
+            },
+          ),
+
+          SizedBox(height: 16.h),
+
+          // Edition Dropdown
+          DropdownButtonFormField<String>(
+            value: _selectedEdition,
+            decoration: InputDecoration(
+              labelText: isArabic ? 'الإصدار' : 'Edition',
+              prefixIcon: Icon(Icons.book, color: AppTheme.primaryColor),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
+            ),
+            items: _availableEditions.map((edition) => DropdownMenuItem(
+              value: edition,
+              child: Text(edition),
+            )).toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedEdition = value ?? 'Standard';
+              });
+            },
           ),
 
           SizedBox(height: 24.h),

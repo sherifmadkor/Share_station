@@ -5,11 +5,13 @@ import 'package:uuid/uuid.dart';
 // Import game_model with prefix to avoid Platform conflict
 import '../data/models/game_model.dart' as game_models;
 import '../data/models/user_model.dart';
+import 'suspension_service.dart';
 
 // Main service class for handling contributions
 class ContributionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
+  final SuspensionService _suspensionService = SuspensionService();
 
   // Helper method to calculate borrow limit based on shares
   int _calculateBorrowLimit(int totalShares, int fundShares) {
@@ -51,6 +53,8 @@ class ContributionService {
     String? region,
     String? coverImageUrl,
     String? description,
+    String? existingGameId, // NEW: ID of existing game to add account to
+    bool isFullAccount = false, // NEW: Flag for full account handling
   }) async {
     try {
       // Create contribution request document
@@ -66,20 +70,28 @@ class ContributionService {
           'email': email,
           'password': password,
         },
-        'edition': edition ?? 'standard',
+        'edition': edition ?? 'Standard',
         'region': region ?? 'US',
         'coverImageUrl': coverImageUrl,
         'description': description,
         'status': 'pending',
         'type': 'game_account',
         'submittedAt': FieldValue.serverTimestamp(),
+        'existingGameId': existingGameId, // Store reference to existing game
+        'isFullAccount': isFullAccount, // Flag for special handling
       };
 
       await _firestore.collection('contribution_requests').add(requestData);
 
+      // Update user contribution activity and check for VIP promotion
+      await _suspensionService.updateLastContribution(userId);
+      await _suspensionService.checkAndPromoteToVIP(userId);
+
       return {
         'success': true,
-        'message': 'Contribution submitted successfully! Waiting for admin approval.',
+        'message': existingGameId != null 
+            ? 'Contribution submitted! Your account will be added to the existing game after approval.'
+            : 'Contribution submitted successfully! Waiting for admin approval.',
       };
     } catch (e) {
       print('Error submitting contribution: $e');
@@ -111,6 +123,10 @@ class ContributionService {
       };
 
       await _firestore.collection('contribution_requests').add(requestData);
+
+      // Update user contribution activity and check for VIP promotion
+      await _suspensionService.updateLastContribution(userId);
+      await _suspensionService.checkAndPromoteToVIP(userId);
 
       return {
         'success': true,
@@ -395,15 +411,20 @@ class ContributionService {
       // Commit all changes
       await batch.commit();
 
+      // Update user contribution activity and check for VIP promotion
+      await _suspensionService.updateLastContribution(userId);
+      final vipResult = await _suspensionService.checkAndPromoteToVIP(userId);
+
       String message = 'Contribution approved successfully!';
-      if (shouldPromoteToVIP) {
+      bool wasPromoted = vipResult['success'] == true;
+      if (wasPromoted) {
         message += ' User has been promoted to VIP!';
       }
 
       return {
         'success': true,
         'message': message,
-        'vipPromotion': shouldPromoteToVIP,
+        'vipPromotion': wasPromoted,
       };
     } catch (e) {
       print('Error approving contribution: $e');
@@ -494,15 +515,20 @@ class ContributionService {
 
       await batch.commit();
 
+      // Update user contribution activity and check for VIP promotion
+      await _suspensionService.updateLastContribution(userId);
+      final vipResult = await _suspensionService.checkAndPromoteToVIP(userId);
+
       String message = 'Fund contribution approved successfully!';
-      if (shouldPromoteToVIP) {
+      bool wasPromoted = vipResult['success'] == true;
+      if (wasPromoted) {
         message += ' User has been promoted to VIP!';
       }
 
       return {
         'success': true,
         'message': message,
-        'vipPromotion': shouldPromoteToVIP,
+        'vipPromotion': wasPromoted,
       };
     } catch (e) {
       print('Error approving fund contribution: $e');

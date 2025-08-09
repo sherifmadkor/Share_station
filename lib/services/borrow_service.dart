@@ -5,10 +5,12 @@ import 'package:uuid/uuid.dart';
 // Import with prefix to avoid conflicts
 import '../data/models/game_model.dart' as game_models;
 import '../data/models/user_model.dart';
+import 'suspension_service.dart';
 
 class BorrowService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
+  final SuspensionService _suspensionService = SuspensionService();
 
   // Submit a borrow request
   Future<Map<String, dynamic>> submitBorrowRequest({
@@ -19,7 +21,8 @@ class BorrowService {
     required String accountId,
     required game_models.Platform platform,
     required game_models.AccountType accountType,
-    required double borrowValue, // This is the game's value
+    required double borrowValue,// This is the game's value
+    required String memberId,
   }) async {
     try {
       // Get user data to validate eligibility
@@ -96,6 +99,9 @@ class BorrowService {
       };
 
       final docRef = await _firestore.collection('borrow_requests').add(requestData);
+
+      // Update user activity
+      await _suspensionService.checkAndApplySuspensions();
 
       return {
         'success': true,
@@ -464,6 +470,9 @@ class BorrowService {
       }
 
       await batch.commit();
+
+      // Update user activity
+      await _suspensionService.updateLastContribution(data['userId']);
 
       return {
         'success': true,

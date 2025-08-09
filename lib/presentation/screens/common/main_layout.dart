@@ -32,7 +32,7 @@ class _MainLayoutState extends State<MainLayout> {
     const UserDashboard(),
     const BrowseGamesScreen(),
     const MyBorrowingsScreen(),
-    const ProfileScreen(),
+    const EnhancedProfileScreen(),
   ];
 
   // Admin screens
@@ -40,7 +40,7 @@ class _MainLayoutState extends State<MainLayout> {
     const AdminDashboard(),
     const BrowseGamesScreen(), // Admin can also browse
     const MyBorrowingsScreen(), // Admin can see their borrowings
-    const ProfileScreen(),
+    const EnhancedProfileScreen(),
   ];
 
   @override

@@ -634,7 +634,7 @@ class _UserDashboardState extends State<UserDashboard> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ProfileScreen(),
+                              builder: (context) => const EnhancedProfileScreen(),
                             ),
                           );
                         },

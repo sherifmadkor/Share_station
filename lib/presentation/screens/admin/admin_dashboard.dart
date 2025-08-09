@@ -13,6 +13,8 @@ import '../../widgets/custom_loading.dart';
 import '../admin/manage_contributions_screen.dart';
 import '../admin/manage_borrow_requests_screen.dart';
 import '../admin/manage_users_screen.dart';
+import '../admin/manage_games_screen.dart';
+import '../../../services/suspension_service.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -23,6 +25,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final SuspensionService _suspensionService = SuspensionService();
 
   // Statistics
   int _totalMembers = 0;
@@ -42,6 +45,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     super.initState();
     _loadStatistics();
     _loadBorrowWindowStatus();
+    _runPeriodicSuspensionCheck();
   }
 
   Future<void> _loadStatistics() async {
@@ -227,6 +231,55 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
     } finally {
       setState(() => _isUpdatingWindow = false);
+    }
+  }
+
+  // Run periodic suspension checks and VIP promotions
+  Future<void> _runPeriodicSuspensionCheck() async {
+    try {
+      // Run suspension checks
+      final suspensionResult = await _suspensionService.checkAndApplySuspensions();
+      
+      // Run VIP promotion checks
+      final vipResult = await _suspensionService.batchCheckVIPPromotions();
+      
+      // Show notifications if there are changes
+      if (mounted) {
+        if (suspensionResult['suspended'] > 0) {
+          print('Suspension check completed: ${suspensionResult['suspended']} users suspended out of ${suspensionResult['checked']} checked');
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Suspension check: ${suspensionResult['suspended']} inactive users were suspended',
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        
+        if (vipResult['promoted'] > 0) {
+          print('VIP promotion check completed: ${vipResult['promoted']} users promoted out of ${vipResult['checked']} checked');
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'VIP promotions: ${vipResult['promoted']} users promoted to VIP',
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        
+        // Refresh statistics if there were any changes
+        if (suspensionResult['suspended'] > 0 || vipResult['promoted'] > 0) {
+          _loadStatistics();
+        }
+      }
+    } catch (e) {
+      print('Error running periodic checks: $e');
     }
   }
 
@@ -486,6 +539,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           content: Text(isArabic ? 'قريباً' : 'Coming soon'),
                         ),
                       );
+                    },
+                  ),
+                  SizedBox(height: 12.h),
+                  _buildActionTile(
+                    title: isArabic ? 'إدارة الألعاب' : 'Manage Games',
+                    subtitle: isArabic ? 'إدارة مكتبة الألعاب والحسابات' : 'Manage game library and accounts',
+                    icon: FontAwesomeIcons.gamepad,
+                    color: AppTheme.successColor,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ManageGamesScreen(),
+                        ),
+                      ).then((_) => _loadStatistics());
                     },
                   ),
                 ],
