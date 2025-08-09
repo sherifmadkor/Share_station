@@ -6,11 +6,142 @@ import 'package:uuid/uuid.dart';
 import '../data/models/game_model.dart' as game_models;
 import '../data/models/user_model.dart';
 import 'suspension_service.dart';
+import 'queue_service.dart';
+import 'points_service.dart';
+import 'referral_service.dart';
+import 'metrics_service.dart';
 
 class BorrowService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
   final SuspensionService _suspensionService = SuspensionService();
+  final QueueService _queueService = QueueService();
+  final PointsService _pointsService = PointsService();
+  final ReferralService _referralService = ReferralService();
+  final MetricsService _metricsService = MetricsService();
+
+  // RESERVATION WINDOW & COOLDOWN METHODS
+
+  // Get next Thursday date (reservation window)
+  DateTime getNextThursday([DateTime? from]) {
+    final now = from ?? DateTime.now();
+    final daysUntilThursday = (DateTime.thursday - now.weekday) % 7;
+    final nextThursday = now.add(Duration(days: daysUntilThursday == 0 ? 7 : daysUntilThursday));
+    return DateTime(nextThursday.year, nextThursday.month, nextThursday.day, 0, 0, 0);
+  }
+
+  // Check if today is reservation window (Thursday)
+  bool isReservationWindow() {
+    return DateTime.now().weekday == DateTime.thursday;
+  }
+
+  // Check if borrow window is open (admin controlled)
+  Future<bool> isBorrowWindowOpen() async {
+    try {
+      final doc = await _firestore
+          .collection('settings')
+          .doc('borrow_window')
+          .get();
+      
+      if (doc.exists) {
+        return doc.data()?['isOpen'] ?? false;
+      }
+      return false;
+    } catch (e) {
+      print('Error checking borrow window status: $e');
+      return false;
+    }
+  }
+
+  // Check if user is in cooldown period
+  bool isUserInCooldown(Map<String, dynamic> userData) {
+    final coolDownEndDate = userData['coolDownEndDate'];
+    if (coolDownEndDate == null) return false;
+    
+    final coolDownEnd = (coolDownEndDate as Timestamp).toDate();
+    return coolDownEnd.isAfter(DateTime.now());
+  }
+
+  // Calculate actual borrow value based on account type
+  double calculateActualBorrowValue(double gameValue, String accountType) {
+    switch (accountType.toLowerCase()) {
+      case 'secondary':
+        return gameValue * 0.75; // 75% for secondary accounts
+      case 'psplus':
+      case 'ps_plus':
+        return gameValue * 2.0; // 200% for PS Plus accounts
+      case 'primary':
+      case 'full':
+      default:
+        return gameValue; // 100% for primary/full accounts
+    }
+  }
+
+  // Get reservation window status for UI
+  Future<Map<String, dynamic>> getReservationWindowStatus() async {
+    final now = DateTime.now();
+    final isThursday = now.weekday == DateTime.thursday;
+    final nextThursday = getNextThursday();
+    final daysUntilThursday = nextThursday.difference(now).inDays;
+    final isBorrowWindowOpenStatus = await isBorrowWindowOpen();
+
+    return {
+      'isReservationWindow': isThursday,
+      'isBorrowWindowOpen': isBorrowWindowOpenStatus,
+      'nextThursday': nextThursday,
+      'daysUntilThursday': daysUntilThursday,
+      'canSubmitRequests': isThursday && isBorrowWindowOpenStatus,
+    };
+  }
+
+  // Get user's cooldown status
+  Future<Map<String, dynamic>> getUserCooldownStatus(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      
+      if (!userDoc.exists) {
+        return {'error': 'User not found'};
+      }
+
+      final userData = userDoc.data()!;
+      final coolDownEndDate = userData['coolDownEndDate'];
+      final coolDownEligible = userData['coolDownEligible'] ?? true;
+
+      if (coolDownEndDate == null) {
+        return {
+          'inCooldown': false,
+          'cooldownEligible': coolDownEligible,
+          'message': coolDownEligible ? 'No cooldown' : 'Cooldown eligible but not active',
+        };
+      }
+
+      final coolDownEnd = (coolDownEndDate as Timestamp).toDate();
+      final now = DateTime.now();
+      final inCooldown = coolDownEnd.isAfter(now);
+
+      if (inCooldown) {
+        final daysRemaining = coolDownEnd.difference(now).inDays;
+        final hoursRemaining = coolDownEnd.difference(now).inHours % 24;
+        
+        return {
+          'inCooldown': true,
+          'cooldownEligible': false,
+          'cooldownEndDate': coolDownEnd,
+          'daysRemaining': daysRemaining,
+          'hoursRemaining': hoursRemaining,
+          'message': 'Cooldown active until ${coolDownEnd.day}/${coolDownEnd.month}/${coolDownEnd.year}',
+        };
+      } else {
+        return {
+          'inCooldown': false,
+          'cooldownEligible': true,
+          'message': 'Cooldown expired, eligible for borrowing',
+        };
+      }
+    } catch (e) {
+      return {'error': 'Failed to get cooldown status: $e'};
+    }
+  }
 
   // Submit a borrow request
   Future<Map<String, dynamic>> submitBorrowRequest({
@@ -69,17 +200,37 @@ class BorrowService {
         };
       }
 
+      // Check if borrow window is open (admin control)
+      final isBorrowWindowOpenStatus = await isBorrowWindowOpen();
+      if (!isBorrowWindowOpenStatus) {
+        return {
+          'success': false,
+          'message': 'Borrowing is currently disabled. Please try again when the borrow window is open.',
+        };
+      }
+
+      // Check reservation window (Thursday only for most users)
+      final isReservationDay = isReservationWindow();
+      final coolDownEligible = userData['coolDownEligible'] ?? true;
+      
+      if (!isReservationDay && !coolDownEligible) {
+        final nextThursday = getNextThursday();
+        final daysUntilThursday = nextThursday.difference(DateTime.now()).inDays;
+        return {
+          'success': false,
+          'message': 'You can only submit borrow requests on Thursdays. Next reservation window is in $daysUntilThursday days.',
+        };
+      }
+
       // Check cooldown status
-      final coolDownEndDate = userData['coolDownEndDate'];
-      if (coolDownEndDate != null) {
-        final coolDownEnd = (coolDownEndDate as Timestamp).toDate();
-        if (coolDownEnd.isAfter(DateTime.now())) {
-          final daysRemaining = coolDownEnd.difference(DateTime.now()).inDays;
-          return {
-            'success': false,
-            'message': 'You are in cooldown period. You can borrow again in $daysRemaining days.',
-          };
-        }
+      if (isUserInCooldown(userData)) {
+        final coolDownEndDate = userData['coolDownEndDate'] as Timestamp;
+        final coolDownEnd = coolDownEndDate.toDate();
+        final daysRemaining = coolDownEnd.difference(DateTime.now()).inDays;
+        return {
+          'success': false,
+          'message': 'You are in cooldown period. You can borrow again on ${coolDownEnd.day}/${coolDownEnd.month} (${daysRemaining} days).',
+        };
       }
 
       // Create borrow request
@@ -217,11 +368,17 @@ class BorrowService {
 
       final data = requestDoc.data()!;
 
+      // Calculate actual borrow value based on account type
+      final gameValue = (data['gameValue'] ?? data['borrowValue']).toDouble();
+      final accountTypeStr = data['accountType'].toString();
+      final actualBorrowValue = calculateActualBorrowValue(gameValue, accountTypeStr);
+
       // Update request status
       batch.update(requestDoc.reference, {
         'status': 'approved',
         'approvalDate': FieldValue.serverTimestamp(),
         'approvedBy': 'admin', // You can pass actual admin ID
+        'actualBorrowValue': actualBorrowValue,
       });
 
       // Update game slot status and get account data
@@ -278,32 +435,28 @@ class BorrowService {
       final accountType = game_models.AccountType.fromString(data['accountType']);
       double borrowCount = accountType.borrowLimitImpact;
 
+      // Update user metrics with actual borrow value and cooldown
+      final nextThursday = getNextThursday();
+      
       batch.update(userRef, {
         'currentBorrows': FieldValue.increment(borrowCount),
         'totalBorrowsCount': FieldValue.increment(1),
-        'remainingStationLimit': FieldValue.increment(-data['borrowValue']),
-        'netBorrowings': FieldValue.increment(data['borrowValue']),
-        'points': FieldValue.increment(data['borrowValue']), // 1 point per LE
-        'expensePoints': FieldValue.increment(data['borrowValue']),
+        'remainingStationLimit': FieldValue.increment(-actualBorrowValue),
+        'netBorrowings': FieldValue.increment(actualBorrowValue),
+        'points': FieldValue.increment(actualBorrowValue.round()), // 1 point per LE
+        'expensePoints': FieldValue.increment(actualBorrowValue.round()),
         'lastActivityDate': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
+        // Set cooldown until next Thursday (reservation window)
+        'coolDownEligible': false,
+        'coolDownEndDate': Timestamp.fromDate(nextThursday),
       });
-
-      // Set cooldown for primary or full account borrows
-      if (accountType == game_models.AccountType.primary || accountType == game_models.AccountType.full) {
-        batch.update(userRef, {
-          'coolDownEligible': false,
-          'coolDownEndDate': Timestamp.fromDate(
-            DateTime.now().add(Duration(days: 7)), // 7 days cooldown
-          ),
-        });
-      }
 
       // Update contributor's lending metrics
       if (contributorId != null && contributorId != data['userId']) {
         final contributorRef = _firestore.collection('users').doc(contributorId);
         batch.update(contributorRef, {
-          'netLending': FieldValue.increment(data['borrowValue']),
+          'netLending': FieldValue.increment(actualBorrowValue),
           'totalLendings': FieldValue.increment(1),
         });
       }
@@ -318,7 +471,8 @@ class BorrowService {
         'accountId': data['accountId'],
         'platform': data['platform'],
         'accountType': data['accountType'],
-        'borrowValue': data['borrowValue'],
+        'gameValue': data['gameValue'] ?? data['borrowValue'], // Original game value
+        'borrowValue': actualBorrowValue, // Calculated borrow value
         'status': 'active',
         'borrowDate': FieldValue.serverTimestamp(),
         'expectedReturnDate': Timestamp.fromDate(
@@ -329,6 +483,31 @@ class BorrowService {
       batch.set(_firestore.collection('borrow_history').doc(), historyData);
 
       await batch.commit();
+
+      // Award points for spending (using points service for proper logging)
+      await _pointsService.awardSpendingPoints(
+        userId: data['userId'],
+        amountSpent: actualBorrowValue,
+        description: 'Borrowing: ${data['gameTitle']}',
+      );
+
+      // Process referral earnings for this transaction
+      await _referralService.processActivityReferralEarnings(
+        userId: data['userId'],
+        transactionAmount: actualBorrowValue,
+        activityType: 'borrow',
+        activityDescription: 'Game borrowing: ${data['gameTitle']}',
+      );
+
+      // Process metrics
+      await _metricsService.processBorrowMetrics(
+        borrowerId: data['userId'],
+        lenderId: contributorId,
+        borrowerTier: userData['tier'] ?? 'member',
+        lenderTier: 'member', // Assuming member-contributed games
+        borrowValue: actualBorrowValue,
+        freeborrowingsRemaining: userData['freeborrowings'] ?? 0,
+      );
 
       return {
         'success': true,
@@ -470,6 +649,20 @@ class BorrowService {
       }
 
       await batch.commit();
+
+      // Update average hold period metrics
+      await _metricsService.updateAverageHoldPeriod(
+        userId: data['userId'],
+        daysHeld: holdPeriod,
+      );
+
+      // Process queue for the newly available slot
+      await _queueService.processQueueForAvailableSlot(
+        gameId: data['gameId'],
+        accountId: data['accountId'],
+        platform: data['platform'],
+        accountType: data['accountType'],
+      );
 
       // Update user activity
       await _suspensionService.updateLastContribution(data['userId']);

@@ -6,12 +6,16 @@ import 'package:uuid/uuid.dart';
 import '../data/models/game_model.dart' as game_models;
 import '../data/models/user_model.dart';
 import 'suspension_service.dart';
+import 'balance_service.dart';
+import 'referral_service.dart';
 
 // Main service class for handling contributions
 class ContributionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
   final SuspensionService _suspensionService = SuspensionService();
+  final BalanceService _balanceService = BalanceService();
+  final ReferralService _referralService = ReferralService();
 
   // Helper method to calculate borrow limit based on shares
   int _calculateBorrowLimit(int totalShares, int fundShares) {
@@ -329,22 +333,8 @@ class ContributionService {
         totalShares += accountType.shareValue;
       }
 
-      // Create balance entry for 70% of game value (expires in 90 days)
-      final balanceEntryId = _uuid.v4();
-      final now = DateTime.now();
-      final balanceEntry = {
-        'id': balanceEntryId,
-        'type': 'borrowValue',
-        'amount': gameValue * 0.7,
-        'description': 'Contribution: $gameTitle',
-        'date': Timestamp.fromDate(now),
-        'expiryDate': Timestamp.fromDate(now.add(Duration(days: 90))),
-        'isExpired': false,
-      };
-
-      // Get existing balance entries
-      List<dynamic> balanceEntries = userData['balanceEntries'] ?? [];
-      balanceEntries.add(balanceEntry);
+      // Balance entry will be added separately using balance service
+      final borrowValueAmount = gameValue * 0.7;
 
       // Calculate new borrow limit based on total shares
       final currentGameShares = (userData['gameShares'] ?? 0).toDouble();
@@ -375,7 +365,7 @@ class ContributionService {
         'gameShares': newGameShares,
         'totalShares': newTotalShares,
         'borrowLimit': newBorrowLimit,
-        'balanceEntries': balanceEntries,
+        // borrowValue will be updated by balance service
         'lastActivityDate': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -410,6 +400,24 @@ class ContributionService {
 
       // Commit all changes
       await batch.commit();
+
+      // Add balance entry using balance service
+      await _balanceService.addBalanceEntry(
+        userId: userId,
+        type: 'borrowValue',
+        amount: borrowValueAmount,
+        description: 'Contribution: $gameTitle',
+        expires: true,
+        expiryDays: 90,
+      );
+
+      // Process referral earnings for this contribution
+      await _referralService.processActivityReferralEarnings(
+        userId: userId,
+        transactionAmount: gameValue,
+        activityType: 'contribution',
+        activityDescription: 'Game contribution: $gameTitle',
+      );
 
       // Update user contribution activity and check for VIP promotion
       await _suspensionService.updateLastContribution(userId);
@@ -514,6 +522,24 @@ class ContributionService {
       // TODO: Add fund contribution to games_vault collection if needed
 
       await batch.commit();
+
+      // Add balance entry using balance service (fund contributions create refunds balance)
+      await _balanceService.addBalanceEntry(
+        userId: userId,
+        type: 'refunds',
+        amount: amount,
+        description: 'Fund Contribution: $gameTitle',
+        expires: true,
+        expiryDays: 90,
+      );
+
+      // Process referral earnings for this fund contribution
+      await _referralService.processActivityReferralEarnings(
+        userId: userId,
+        transactionAmount: amount,
+        activityType: 'fund_contribution',
+        activityDescription: 'Fund contribution: $gameTitle',
+      );
 
       // Update user contribution activity and check for VIP promotion
       await _suspensionService.updateLastContribution(userId);

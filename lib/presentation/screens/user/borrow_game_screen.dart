@@ -12,7 +12,9 @@ import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/game_model.dart' as game_models;
+import '../../../data/models/queue_model.dart';
 import '../../../services/borrow_service.dart';
+import '../../../services/queue_service.dart';
 // import '../../widgets/custom_loading.dart'; // Unused import removed
 
 class BorrowGameScreen extends StatefulWidget {
@@ -30,6 +32,7 @@ class BorrowGameScreen extends StatefulWidget {
 class _BorrowGameScreenState extends State<BorrowGameScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final BorrowService _borrowService = BorrowService();
+  final QueueService _queueService = QueueService();
 
   game_models.Platform? _selectedPlatform;
   game_models.AccountType? _selectedAccountType;
@@ -42,11 +45,19 @@ class _BorrowGameScreenState extends State<BorrowGameScreen> {
   // Available slots for this game
   List<Map<String, dynamic>> _availableSlots = [];
 
+  // Queue-related state
+  bool _isInQueue = false;
+  int _queuePosition = 0;
+  int _estimatedDays = 0;
+  String? _queueId;
+  QueueSummary? _queueSummary;
+
   @override
   void initState() {
     super.initState();
     _loadAvailableSlots();
     _checkBorrowWindow();
+    _checkQueueStatus();
   }
 
   Future<void> _checkBorrowWindow() async {
@@ -162,6 +173,170 @@ class _BorrowGameScreenState extends State<BorrowGameScreen> {
         return widget.game.gameValue * 1.0; // 100%
       case game_models.AccountType.psPlus:
         return widget.game.gameValue * 2.0; // 200%
+    }
+  }
+
+  // Check if user is in queue for selected slot
+  Future<void> _checkQueueStatus() async {
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.currentUser;
+    
+    if (user == null || _selectedAccountId == null || _selectedPlatform == null || _selectedAccountType == null) {
+      return;
+    }
+
+    try {
+      // Check user's queue position
+      final queuePosition = await _queueService.getUserQueuePosition(
+        userId: user.uid,
+        gameId: widget.game.accountId,
+        accountId: _selectedAccountId!,
+        platform: _selectedPlatform!.value,
+        accountType: _selectedAccountType!.value,
+      );
+
+      // Get queue summary
+      final queueSummary = await _queueService.getQueueSummary(
+        gameId: widget.game.accountId,
+        gameTitle: widget.game.title,
+        accountId: _selectedAccountId!,
+        platform: _selectedPlatform!.value,
+        accountType: _selectedAccountType!.value,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isInQueue = queuePosition['inQueue'] ?? false;
+          _queuePosition = queuePosition['position'] ?? 0;
+          _estimatedDays = queuePosition['estimatedDays'] ?? 0;
+          _queueId = queuePosition['queueId'];
+          _queueSummary = queueSummary;
+        });
+      }
+    } catch (e) {
+      print('Error checking queue status: $e');
+    }
+  }
+
+  // Join queue for the selected slot
+  Future<void> _joinQueue() async {
+    final authProvider = context.read<AuthProvider>();
+    final appProvider = context.read<AppProvider>();
+    final isArabic = appProvider.isArabic;
+    final user = authProvider.currentUser;
+
+    if (user == null) {
+      Fluttertoast.showToast(
+        msg: isArabic ? 'يجب تسجيل الدخول' : 'Please login',
+        backgroundColor: AppTheme.errorColor,
+      );
+      return;
+    }
+
+    if (_selectedAccountId == null || _selectedPlatform == null || _selectedAccountType == null) {
+      Fluttertoast.showToast(
+        msg: isArabic ? 'الرجاء اختيار منصة ونوع الحساب' : 'Please select platform and account type',
+        backgroundColor: AppTheme.errorColor,
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final result = await _queueService.joinQueue(
+        userId: user.uid,
+        userName: user.name,
+        gameId: widget.game.accountId,
+        gameTitle: widget.game.title,
+        accountId: _selectedAccountId!,
+        platform: _selectedPlatform!.value,
+        accountType: _selectedAccountType!.value,
+        userTotalShares: user.totalShares,
+        memberId: user.memberId,
+      );
+
+      if (mounted) {
+        if (result['success']) {
+          Fluttertoast.showToast(
+            msg: isArabic 
+                ? 'تمت إضافتك للقائمة. موضعك: ${result['position']}'
+                : 'Added to queue. Position: ${result['position']}',
+            backgroundColor: AppTheme.successColor,
+          );
+          
+          // Refresh queue status
+          _checkQueueStatus();
+        } else {
+          Fluttertoast.showToast(
+            msg: result['message'] ?? (isArabic ? 'فشل في الانضمام للقائمة' : 'Failed to join queue'),
+            backgroundColor: AppTheme.errorColor,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Fluttertoast.showToast(
+          msg: isArabic ? 'خطأ في الانضمام للقائمة' : 'Error joining queue',
+          backgroundColor: AppTheme.errorColor,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  // Leave queue
+  Future<void> _leaveQueue() async {
+    final authProvider = context.read<AuthProvider>();
+    final appProvider = context.read<AppProvider>();
+    final isArabic = appProvider.isArabic;
+    final user = authProvider.currentUser;
+
+    if (user == null || _selectedAccountId == null || _selectedPlatform == null || _selectedAccountType == null) {
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      final result = await _queueService.leaveQueue(
+        userId: user.uid,
+        gameId: widget.game.accountId,
+        accountId: _selectedAccountId!,
+        platform: _selectedPlatform!.value,
+        accountType: _selectedAccountType!.value,
+      );
+
+      if (mounted) {
+        if (result['success']) {
+          Fluttertoast.showToast(
+            msg: isArabic ? 'تم إزالتك من القائمة' : 'Left queue successfully',
+            backgroundColor: AppTheme.successColor,
+          );
+          
+          // Refresh queue status
+          _checkQueueStatus();
+        } else {
+          Fluttertoast.showToast(
+            msg: result['message'] ?? (isArabic ? 'فشل في مغادرة القائمة' : 'Failed to leave queue'),
+            backgroundColor: AppTheme.errorColor,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Fluttertoast.showToast(
+          msg: isArabic ? 'خطأ في مغادرة القائمة' : 'Error leaving queue',
+          backgroundColor: AppTheme.errorColor,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -548,6 +723,8 @@ class _BorrowGameScreenState extends State<BorrowGameScreen> {
                               _selectedPlatform = platform;
                               _selectedAccountType = accountType;
                             });
+                            // Check queue status for new selection
+                            _checkQueueStatus();
                           },
                           borderRadius: BorderRadius.circular(12.r),
                           child: Padding(
@@ -731,14 +908,182 @@ class _BorrowGameScreenState extends State<BorrowGameScreen> {
 
                 SizedBox(height: 24.h),
 
-                // Submit Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56.h,
-                  child: ElevatedButton(
-                    onPressed: (_isSubmitting || remainingAfterBorrow < 0 || (!_isWindowOpen && !authProvider.isAdmin))
-                        ? null
-                        : _submitBorrowRequest,
+                // Queue Status Section
+                if (_queueSummary != null && _queueSummary!.totalInQueue > 0 || _isInQueue) ...[
+                  Container(
+                    padding: EdgeInsets.all(16.w),
+                    decoration: BoxDecoration(
+                      color: _isInQueue 
+                        ? AppTheme.successColor.withOpacity(0.1)
+                        : AppTheme.warningColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12.r),
+                      border: Border.all(
+                        color: _isInQueue 
+                          ? AppTheme.successColor
+                          : AppTheme.warningColor,
+                        width: 1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _isInQueue 
+                                ? Icons.queue_outlined
+                                : Icons.people_outline,
+                              color: _isInQueue 
+                                ? AppTheme.successColor
+                                : AppTheme.warningColor,
+                              size: 20.sp,
+                            ),
+                            SizedBox(width: 8.w),
+                            Text(
+                              isArabic ? 'قائمة الانتظار' : 'Queue Status',
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.bold,
+                                color: _isInQueue 
+                                  ? AppTheme.successColor
+                                  : AppTheme.warningColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 12.h),
+                        if (_isInQueue) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                isArabic ? 'موضعك في القائمة:' : 'Your Position:',
+                                style: TextStyle(fontSize: 14.sp),
+                              ),
+                              Text(
+                                '#$_queuePosition',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.successColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8.h),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                isArabic ? 'التوقيت المقدر:' : 'Estimated Time:',
+                                style: TextStyle(fontSize: 14.sp),
+                              ),
+                              Text(
+                                isArabic 
+                                  ? '$_estimatedDays ${_estimatedDays == 1 ? "يوم" : "أيام"}'
+                                  : '$_estimatedDays day${_estimatedDays == 1 ? "" : "s"}',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.warningColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ] else ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                isArabic ? 'المنتظرين في القائمة:' : 'People in Queue:',
+                                style: TextStyle(fontSize: 14.sp),
+                              ),
+                              Text(
+                                '${_queueSummary!.totalInQueue}',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.warningColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_queueSummary!.estimatedWaitDays > 0) ...[
+                            SizedBox(height: 8.h),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  isArabic ? 'الانتظار المقدر:' : 'Estimated Wait:',
+                                  style: TextStyle(fontSize: 14.sp),
+                                ),
+                                Text(
+                                  isArabic 
+                                    ? '~${_queueSummary!.estimatedWaitDays} ${_queueSummary!.estimatedWaitDays == 1 ? "يوم" : "أيام"}'
+                                    : '~${_queueSummary!.estimatedWaitDays} day${_queueSummary!.estimatedWaitDays == 1 ? "" : "s"}',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.warningColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+                  
+                  SizedBox(height: 16.h),
+
+                  // Queue Action Button
+                  if (_selectedSlot != null && _selectedSlot!['slotData']['status'] != 'available') ...[
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48.h,
+                      child: ElevatedButton(
+                        onPressed: _isSubmitting
+                            ? null
+                            : _isInQueue 
+                              ? _leaveQueue
+                              : _joinQueue,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isInQueue 
+                            ? AppTheme.errorColor
+                            : AppTheme.warningColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12.r),
+                          ),
+                        ),
+                        child: _isSubmitting
+                            ? CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                            : Text(
+                              _isInQueue
+                                ? (isArabic ? 'مغادرة القائمة' : 'Leave Queue')
+                                : (isArabic ? 'الانضمام للقائمة' : 'Join Queue'),
+                              style: TextStyle(
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                      ),
+                    ),
+
+                    SizedBox(height: 16.h),
+                  ],
+                ],
+
+                // Submit Button (only show for available slots)
+                if (_selectedSlot != null && _selectedSlot!['slotData']['status'] == 'available') ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56.h,
+                    child: ElevatedButton(
+                      onPressed: (_isSubmitting || remainingAfterBorrow < 0 || (!_isWindowOpen && !authProvider.isAdmin))
+                          ? null
+                          : _submitBorrowRequest,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryColor,
                       shape: RoundedRectangleBorder(
@@ -759,9 +1104,10 @@ class _BorrowGameScreenState extends State<BorrowGameScreen> {
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           );

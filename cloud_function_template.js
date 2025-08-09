@@ -75,9 +75,104 @@ exports.dailySuspensionCheck = functions.pubsub
     }
   });
 
+// Function to check and expire balances (runs daily)
+exports.dailyBalanceExpiryCheck = functions.pubsub
+  .schedule('0 1 * * *') // Runs every day at 1:00 AM UTC (before suspension check)
+  .timeZone('UTC')
+  .onRun(async (context) => {
+    try {
+      console.log('Starting daily balance expiry check...');
+
+      let expiredCount = 0;
+      let usersAffected = 0;
+      let totalExpiredAmount = 0;
+      let checkedCount = 0;
+
+      // Get all active users with balance entries
+      const usersQuery = await firestore
+        .collection('users')
+        .where('status', '==', 'active')
+        .get();
+
+      const batch = firestore.batch();
+      const now = new Date();
+
+      for (const doc of usersQuery.docs) {
+        checkedCount++;
+        const userData = doc.data();
+        const balanceEntries = userData.balanceEntries || [];
+
+        if (balanceEntries.length === 0) continue;
+
+        let userExpiredAmount = 0;
+        const expiredByType = {};
+        let hasExpiredEntries = false;
+
+        // Check each balance entry for expiry
+        const updatedEntries = balanceEntries.map(entry => {
+          // Skip already expired entries
+          if (entry.isExpired === true) return entry;
+
+          const expiryDate = entry.expiryDate;
+          if (expiryDate && expiryDate.toDate().getTime() < now.getTime()) {
+            // Mark as expired
+            entry.isExpired = true;
+            const amount = entry.amount || 0;
+            const type = entry.type || 'unknown';
+            
+            userExpiredAmount += amount;
+            expiredByType[type] = (expiredByType[type] || 0) + amount;
+            expiredCount++;
+            hasExpiredEntries = true;
+          }
+          return entry;
+        });
+
+        if (hasExpiredEntries) {
+          totalExpiredAmount += userExpiredAmount;
+          usersAffected++;
+
+          // Prepare update data
+          const updateData = {
+            balanceEntries: updatedEntries,
+            expiredBalance: admin.firestore.FieldValue.increment(userExpiredAmount),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          };
+
+          // Decrement each balance type that expired
+          Object.entries(expiredByType).forEach(([type, amount]) => {
+            updateData[type] = admin.firestore.FieldValue.increment(-amount);
+          });
+
+          batch.update(doc.ref, updateData);
+        }
+      }
+
+      // Commit all changes
+      if (usersAffected > 0) {
+        await batch.commit();
+        console.log(`Expired ${expiredCount} balance entries for ${usersAffected} users. Total expired: ${totalExpiredAmount.toFixed(2)} LE`);
+      } else {
+        console.log(`No balance entries expired. Checked ${checkedCount} users.`);
+      }
+
+      return {
+        success: true,
+        message: 'Daily balance expiry check completed',
+        checked: checkedCount,
+        expired: expiredCount,
+        usersAffected: usersAffected,
+        totalExpired: totalExpiredAmount,
+      };
+    } catch (error) {
+      console.error('Error in daily balance expiry check:', error);
+      throw new functions.https.HttpsError('internal', 'Balance expiry check failed');
+    }
+  });
+
 // Function to check and promote eligible users to VIP (runs daily)
 exports.dailyVIPPromotionCheck = functions.pubsub
-  .schedule('0 3 * * *') // Runs every day at 3:00 AM UTC (after suspension check)
+  .schedule('0 3 * * *') // Runs every day at 3:00 AM UTC (after suspension and balance checks)
   .timeZone('UTC')
   .onRun(async (context) => {
     try {
@@ -301,6 +396,101 @@ exports.manualSuspensionCheck = functions.https.onCall(async (data, context) => 
   }
 });
 
+// Manual balance expiry check function for admin use
+exports.manualBalanceExpiryCheck = functions.https.onCall(async (data, context) => {
+  // Verify that the request is made by an admin
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
+  }
+
+  try {
+    // Get the user's role from Firestore
+    const userDoc = await firestore.collection('users').doc(context.auth.uid).get();
+    const userData = userDoc.data();
+
+    if (!userData || userData.tier !== 'admin') {
+      throw new functions.https.HttpsError('permission-denied', 'Must be admin');
+    }
+
+    console.log('Starting manual balance expiry check by admin:', context.auth.uid);
+
+    let expiredCount = 0;
+    let usersAffected = 0;
+    let totalExpiredAmount = 0;
+    let checkedCount = 0;
+
+    const usersQuery = await firestore
+      .collection('users')
+      .where('status', '==', 'active')
+      .get();
+
+    const batch = firestore.batch();
+    const now = new Date();
+
+    for (const doc of usersQuery.docs) {
+      checkedCount++;
+      const userData = doc.data();
+      const balanceEntries = userData.balanceEntries || [];
+
+      if (balanceEntries.length === 0) continue;
+
+      let userExpiredAmount = 0;
+      const expiredByType = {};
+      let hasExpiredEntries = false;
+
+      const updatedEntries = balanceEntries.map(entry => {
+        if (entry.isExpired === true) return entry;
+
+        const expiryDate = entry.expiryDate;
+        if (expiryDate && expiryDate.toDate().getTime() < now.getTime()) {
+          entry.isExpired = true;
+          const amount = entry.amount || 0;
+          const type = entry.type || 'unknown';
+          
+          userExpiredAmount += amount;
+          expiredByType[type] = (expiredByType[type] || 0) + amount;
+          expiredCount++;
+          hasExpiredEntries = true;
+        }
+        return entry;
+      });
+
+      if (hasExpiredEntries) {
+        totalExpiredAmount += userExpiredAmount;
+        usersAffected++;
+
+        const updateData = {
+          balanceEntries: updatedEntries,
+          expiredBalance: admin.firestore.FieldValue.increment(userExpiredAmount),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        Object.entries(expiredByType).forEach(([type, amount]) => {
+          updateData[type] = admin.firestore.FieldValue.increment(-amount);
+        });
+
+        batch.update(doc.ref, updateData);
+      }
+    }
+
+    if (usersAffected > 0) {
+      await batch.commit();
+    }
+
+    return {
+      success: true,
+      message: 'Manual balance expiry check completed',
+      checked: checkedCount,
+      expired: expiredCount,
+      usersAffected: usersAffected,
+      totalExpired: totalExpiredAmount,
+    };
+  } catch (error) {
+    console.error('Error in manual balance expiry check:', error);
+    throw new functions.https.HttpsError('internal', 'Manual balance expiry check failed');
+  }
+});
+
 // Manual VIP promotion check function for admin use
 exports.manualVIPPromotionCheck = functions.https.onCall(async (data, context) => {
   // Verify that the request is made by an admin
@@ -381,3 +571,147 @@ exports.manualVIPPromotionCheck = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('internal', 'Manual VIP promotion check failed');
   }
 });
+
+// Daily score calculation (runs at 4 AM UTC)
+exports.dailyScoreCalculation = functions.pubsub
+  .schedule('0 4 * * *')
+  .timeZone('UTC')
+  .onRun(async (context) => {
+    console.log('Starting daily score calculation...');
+    
+    try {
+      // Get all active borrowers
+      const usersSnapshot = await firestore
+        .collection('users')
+        .where('status', '==', 'active')
+        .where('totalBorrowsCount', '>', 0)
+        .get();
+      
+      // Group by tier
+      const tierGroups = {
+        member: [],
+        vip: [],
+        client: [],
+        user: [],
+      };
+      
+      usersSnapshot.forEach(doc => {
+        const data = doc.data();
+        data.id = doc.id;
+        const tier = data.tier || 'member';
+        if (tierGroups[tier]) {
+          tierGroups[tier].push(data);
+        }
+      });
+      
+      const batch = firestore.batch();
+      let totalUpdated = 0;
+      
+      // Calculate scores for each tier
+      for (const tier of Object.keys(tierGroups)) {
+        const users = tierGroups[tier];
+        if (users.length === 0) continue;
+        
+        // Sort and rank for each metric
+        // C Score - Contribution
+        users.sort((a, b) => (b.totalShares || 0) - (a.totalShares || 0));
+        users.forEach((user, index) => {
+          user.cScore = index + 1;
+        });
+        
+        // F Score - Funds
+        users.sort((a, b) => (b.fundShares || 0) - (a.fundShares || 0));
+        users.forEach((user, index) => {
+          user.fScore = index + 1;
+        });
+        
+        // H Score - Hold Period (lower is better)
+        users.sort((a, b) => (a.averageHoldPeriod || 999) - (b.averageHoldPeriod || 999));
+        users.forEach((user, index) => {
+          user.hScore = index + 1;
+        });
+        
+        // E Score - Exchange
+        users.sort((a, b) => (b.netExchange || 0) - (a.netExchange || 0));
+        users.forEach((user, index) => {
+          user.eScore = index + 1;
+        });
+        
+        // Update each user
+        users.forEach(user => {
+          const overallScore = 
+            (user.cScore * 0.2) + 
+            (user.fScore * 0.35) + 
+            (user.hScore * 0.1) + 
+            (user.eScore * 0.35);
+          
+          const userRef = firestore.collection('users').doc(user.id);
+          batch.update(userRef, {
+            cScore: user.cScore,
+            fScore: user.fScore,
+            hScore: user.hScore,
+            eScore: user.eScore,
+            overallScore: overallScore,
+            scoresUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          
+          totalUpdated++;
+        });
+      }
+      
+      await batch.commit();
+      
+      console.log(`Score calculation complete. Updated ${totalUpdated} users.`);
+      return { success: true, usersUpdated: totalUpdated };
+    } catch (error) {
+      console.error('Error calculating scores:', error);
+      throw error;
+    }
+  });
+
+// Weekly client renewal check (runs every Sunday at 12 AM UTC)
+exports.weeklyClientRenewalCheck = functions.pubsub
+  .schedule('0 0 * * 0')
+  .timeZone('UTC')
+  .onRun(async (context) => {
+    console.log('Starting weekly client renewal check...');
+    
+    try {
+      const clientsSnapshot = await firestore
+        .collection('users')
+        .where('tier', '==', 'client')
+        .where('status', '==', 'active')
+        .get();
+      
+      let needsRenewal = [];
+      
+      for (const doc of clientsSnapshot.docs) {
+        const data = doc.data();
+        const totalBorrows = data.totalBorrowsCount || 0;
+        
+        if (totalBorrows >= 10) {
+          needsRenewal.push({
+            userId: doc.id,
+            name: data.name,
+            email: data.email,
+            borrowsUsed: totalBorrows,
+          });
+          
+          // Send notification
+          await firestore.collection('notifications').add({
+            userId: doc.id,
+            type: 'renewal_required',
+            message: 'Your client membership needs renewal (750 LE) to continue borrowing.',
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            read: false,
+          });
+        }
+      }
+      
+      console.log(`Client renewal check complete. ${needsRenewal.length} clients need renewal.`);
+      return { needsRenewal: needsRenewal.length };
+    } catch (error) {
+      console.error('Error checking client renewals:', error);
+      throw error;
+    }
+  });

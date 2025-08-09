@@ -493,6 +493,83 @@ class UserModel {
     return daysRemaining > 0 ? daysRemaining : 0;
   }
 
+  // BALANCE MANAGEMENT HELPER METHODS
+
+  // Get active (non-expired) balance entries
+  List<BalanceEntry> get activeBalanceEntries {
+    return balanceEntries.where((entry) => 
+      !entry.isExpired && 
+      (entry.expiryDate == null || entry.expiryDate!.isAfter(DateTime.now()))
+    ).toList();
+  }
+
+  // Get balance entries that will expire soon (within 30 days)
+  List<BalanceEntry> get expiringBalanceEntries {
+    final thirtyDaysFromNow = DateTime.now().add(Duration(days: 30));
+    return balanceEntries.where((entry) => 
+      !entry.isExpired && 
+      entry.expiryDate != null &&
+      entry.expiryDate!.isBefore(thirtyDaysFromNow) &&
+      entry.expiryDate!.isAfter(DateTime.now())
+    ).toList();
+  }
+
+  // Get expired balance entries
+  List<BalanceEntry> get expiredBalanceEntries {
+    return balanceEntries.where((entry) => 
+      entry.isExpired || 
+      (entry.expiryDate != null && entry.expiryDate!.isBefore(DateTime.now()))
+    ).toList();
+  }
+
+  // Calculate balance by type from active entries
+  double getBalanceByType(String type) {
+    return activeBalanceEntries
+      .where((entry) => entry.type == type)
+      .fold(0.0, (sum, entry) => sum + entry.amount);
+  }
+
+  // Get detailed balance breakdown
+  Map<String, double> get balanceBreakdown {
+    return {
+      'borrowValue': getBalanceByType('borrowValue'),
+      'sellValue': getBalanceByType('sellValue'),
+      'refunds': getBalanceByType('refunds'),
+      'referralEarnings': getBalanceByType('referralEarnings'),
+      'cashIn': getBalanceByType('cashIn'),
+      'expired': expiredBalance,
+      'used': usedBalance,
+      'withdrawalFees': withdrawalFees,
+      'total': totalBalance,
+    };
+  }
+
+  // Calculate total active balance (from active entries only)
+  double get activeBalance {
+    return activeBalanceEntries.fold(0.0, (sum, entry) => sum + entry.amount);
+  }
+
+  // Get balance entries expiring within specified days
+  List<BalanceEntry> getBalanceEntriesExpiringWithin(int days) {
+    final targetDate = DateTime.now().add(Duration(days: days));
+    return balanceEntries.where((entry) => 
+      !entry.isExpired && 
+      entry.expiryDate != null &&
+      entry.expiryDate!.isBefore(targetDate) &&
+      entry.expiryDate!.isAfter(DateTime.now())
+    ).toList();
+  }
+
+  // Check if user has any expiring balance within 30 days
+  bool get hasExpiringBalance {
+    return expiringBalanceEntries.isNotEmpty;
+  }
+
+  // Get total amount expiring within 30 days
+  double get amountExpiringWithin30Days {
+    return expiringBalanceEntries.fold(0.0, (sum, entry) => sum + entry.amount);
+  }
+
   // Factory constructor from Firestore
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;

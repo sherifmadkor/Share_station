@@ -11,6 +11,7 @@ import '../../../data/models/user_model.dart' as user_model;
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../services/borrow_service.dart';
 
 class BorrowRequestScreen extends StatefulWidget {
   // Using the prefixed 'game_models' namespace
@@ -27,6 +28,7 @@ class BorrowRequestScreen extends StatefulWidget {
 
 class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final BorrowService _borrowService = BorrowService();
 
   // Using the prefixed 'game_models' namespace for the types
   game_models.Platform? _selectedPlatform;
@@ -37,11 +39,26 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
   int? _queuePosition;
   DateTime? _estimatedAvailability;
 
+  // Reservation window status
+  bool _isReservationWindow = false;
+  bool _isBorrowWindowOpen = false;
+  DateTime? _nextThursday;
+  int _daysUntilThursday = 0;
+  bool _canSubmitRequests = false;
+
+  // User cooldown status
+  bool _isInCooldown = false;
+  DateTime? _cooldownEndDate;
+  int _cooldownDaysRemaining = 0;
+  String _cooldownMessage = '';
+
   @override
   void initState() {
     super.initState();
     _initializeSelections();
     _checkQueuePosition();
+    _loadReservationWindowStatus();
+    _loadUserCooldownStatus();
   }
 
   void _initializeSelections() {
@@ -105,6 +122,46 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
     }
   }
 
+  // Load reservation window status
+  Future<void> _loadReservationWindowStatus() async {
+    try {
+      final status = await _borrowService.getReservationWindowStatus();
+      if (mounted) {
+        setState(() {
+          _isReservationWindow = status['isReservationWindow'] ?? false;
+          _isBorrowWindowOpen = status['isBorrowWindowOpen'] ?? false;
+          _nextThursday = status['nextThursday'];
+          _daysUntilThursday = status['daysUntilThursday'] ?? 0;
+          _canSubmitRequests = status['canSubmitRequests'] ?? false;
+        });
+      }
+    } catch (e) {
+      print('Error loading reservation window status: $e');
+    }
+  }
+
+  // Load user cooldown status
+  Future<void> _loadUserCooldownStatus() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final user = authProvider.currentUser;
+    
+    if (user == null) return;
+
+    try {
+      final status = await _borrowService.getUserCooldownStatus(user.uid);
+      if (mounted && !status.containsKey('error')) {
+        setState(() {
+          _isInCooldown = status['inCooldown'] ?? false;
+          _cooldownEndDate = status['cooldownEndDate'];
+          _cooldownDaysRemaining = status['daysRemaining'] ?? 0;
+          _cooldownMessage = status['message'] ?? '';
+        });
+      }
+    } catch (e) {
+      print('Error loading user cooldown status: $e');
+    }
+  }
+
   Future<void> _submitBorrowRequest() async {
     // Using context before the async gap is safe
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -121,6 +178,42 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
     }
 
     final borrowValue = _calculateBorrowValue();
+
+    // Check if borrow window is open
+    if (!_isBorrowWindowOpen) {
+      Fluttertoast.showToast(
+        msg: isArabic
+            ? 'نافذة الاستعارة مغلقة حالياً'
+            : 'Borrowing window is currently closed',
+        backgroundColor: AppTheme.errorColor,
+        toastLength: Toast.LENGTH_LONG,
+      );
+      return;
+    }
+
+    // Check reservation window (Thursday only for most users)
+    if (!_canSubmitRequests) {
+      Fluttertoast.showToast(
+        msg: isArabic
+            ? 'يمكنك فقط تقديم طلبات الاستعارة يوم الخميس. النافذة التالية خلال $_daysUntilThursday أيام'
+            : 'You can only submit borrow requests on Thursdays. Next window in $_daysUntilThursday days',
+        backgroundColor: AppTheme.warningColor,
+        toastLength: Toast.LENGTH_LONG,
+      );
+      return;
+    }
+
+    // Check user cooldown status
+    if (_isInCooldown) {
+      Fluttertoast.showToast(
+        msg: isArabic
+            ? 'أنت في فترة التهدئة. متبقي: $_cooldownDaysRemaining أيام'
+            : 'You are in cooldown period. $_cooldownDaysRemaining days remaining',
+        backgroundColor: AppTheme.warningColor,
+        toastLength: Toast.LENGTH_LONG,
+      );
+      return;
+    }
 
     // Validate Station Limit
     if (user.remainingStationLimit < borrowValue) {
@@ -146,18 +239,6 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
       return;
     }
 
-    // Check cooldown period
-    if (user.coolDownEndDate != null && user.coolDownEndDate!.isAfter(DateTime.now())) {
-      final daysLeft = user.coolDownEndDate!.difference(DateTime.now()).inDays;
-      Fluttertoast.showToast(
-        msg: isArabic
-            ? 'أنت في فترة التهدئة. متبقي: $daysLeft أيام'
-            : 'You are in cooldown period. $daysLeft days remaining',
-        backgroundColor: AppTheme.warningColor,
-        toastLength: Toast.LENGTH_LONG,
-      );
-      return;
-    }
 
     setState(() => _isSubmitting = true);
 
@@ -214,6 +295,37 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
         setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  // Get appropriate button text based on current status
+  String _getButtonText(bool isArabic, bool isSlotAvailable) {
+    if (_isInCooldown) {
+      return isArabic 
+        ? 'في فترة تهدئة - $_cooldownDaysRemaining أيام متبقية'
+        : 'In Cooldown - $_cooldownDaysRemaining days left';
+    }
+    
+    if (!_isBorrowWindowOpen) {
+      return isArabic 
+        ? 'نافذة الاستعارة مغلقة'
+        : 'Borrow Window Closed';
+    }
+    
+    if (!_isReservationWindow) {
+      return isArabic 
+        ? 'متاح يوم الخميس فقط'
+        : 'Available Thursdays Only';
+    }
+    
+    // If we can submit requests
+    if (_canSubmitRequests) {
+      return isSlotAvailable
+        ? (isArabic ? 'إرسال طلب الاستعارة' : 'Submit Borrow Request')
+        : (isArabic ? 'الانضمام إلى قائمة الانتظار' : 'Join Waiting Queue');
+    }
+    
+    // Fallback
+    return isArabic ? 'غير متاح' : 'Not Available';
   }
 
   @override
@@ -291,6 +403,119 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
                     ),
                   ],
                 ),
+              ),
+            ),
+
+            SizedBox(height: 20.h),
+
+            // Reservation Window Status Card
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(16.w),
+              decoration: BoxDecoration(
+                color: _canSubmitRequests 
+                  ? AppTheme.successColor.withOpacity(0.1)
+                  : _isReservationWindow 
+                    ? AppTheme.warningColor.withOpacity(0.1)
+                    : AppTheme.errorColor.withOpacity(0.1),
+                border: Border.all(
+                  color: _canSubmitRequests 
+                    ? AppTheme.successColor
+                    : _isReservationWindow 
+                      ? AppTheme.warningColor
+                      : AppTheme.errorColor,
+                  width: 1,
+                ),
+                borderRadius: BorderRadius.circular(12.r),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        _canSubmitRequests 
+                          ? Icons.check_circle
+                          : _isReservationWindow 
+                            ? Icons.access_time
+                            : Icons.schedule,
+                        color: _canSubmitRequests 
+                          ? AppTheme.successColor
+                          : _isReservationWindow 
+                            ? AppTheme.warningColor
+                            : AppTheme.errorColor,
+                        size: 20.sp,
+                      ),
+                      SizedBox(width: 8.w),
+                      Expanded(
+                        child: Text(
+                          _canSubmitRequests
+                            ? (isArabic ? 'نافذة الحجز مفتوحة' : 'Reservation Window Open')
+                            : _isReservationWindow
+                              ? (isArabic ? 'اليوم هو يوم الخميس - نافذة الحجز' : 'Today is Thursday - Reservation Day')
+                              : (isArabic ? 'نافذة الحجز مغلقة' : 'Reservation Window Closed'),
+                          style: TextStyle(
+                            fontSize: 14.sp,
+                            fontWeight: FontWeight.w600,
+                            color: _canSubmitRequests 
+                              ? AppTheme.successColor
+                              : _isReservationWindow 
+                                ? AppTheme.warningColor
+                                : AppTheme.errorColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8.h),
+                  Text(
+                    _canSubmitRequests
+                      ? (isArabic ? 'يمكنك تقديم طلبات الاستعارة الآن' : 'You can submit borrow requests now')
+                      : _isReservationWindow
+                        ? (isArabic 
+                            ? 'نافذة الاستعارة مغلقة من قبل المسؤول' 
+                            : 'Borrow window is closed by admin')
+                        : (isArabic 
+                            ? 'النافذة التالية خلال $_daysUntilThursday ${_daysUntilThursday == 1 ? "يوم" : "أيام"}'
+                            : 'Next window in $_daysUntilThursday day${_daysUntilThursday == 1 ? "" : "s"}'),
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      color: isDarkMode ? Colors.white70 : Colors.black54,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (_isInCooldown) ...[
+                    SizedBox(height: 8.h),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warningColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20.r),
+                        border: Border.all(color: AppTheme.warningColor, width: 1),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.hourglass_empty,
+                            size: 14.sp,
+                            color: AppTheme.warningColor,
+                          ),
+                          SizedBox(width: 4.w),
+                          Text(
+                            isArabic 
+                              ? 'فترة تهدئة: $_cooldownDaysRemaining أيام'
+                              : 'Cooldown: $_cooldownDaysRemaining days',
+                            style: TextStyle(
+                              fontSize: 11.sp,
+                              color: AppTheme.warningColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
 
@@ -558,7 +783,10 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
               width: double.infinity,
               height: 48.h,
               child: ElevatedButton(
-                onPressed: _isSubmitting || user == null
+                onPressed: _isSubmitting || 
+                          user == null || 
+                          !_canSubmitRequests || 
+                          _isInCooldown
                     ? null
                     : _submitBorrowRequest,
                 style: ElevatedButton.styleFrom(
@@ -573,9 +801,7 @@ class _BorrowRequestScreenState extends State<BorrowRequestScreen> {
                   strokeWidth: 2,
                 )
                     : Text(
-                  isSlotAvailable
-                      ? (isArabic ? 'إرسال طلب الاستعارة' : 'Submit Borrow Request')
-                      : (isArabic ? 'الانضمام إلى قائمة الانتظار' : 'Join Waiting Queue'),
+                  _getButtonText(isArabic, isSlotAvailable),
                   style: TextStyle(
                     fontSize: 16.sp,
                     fontWeight: FontWeight.bold,

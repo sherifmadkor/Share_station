@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/models/user_model.dart';
+import '../../services/referral_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ReferralService _referralService = ReferralService();
 
   User? _firebaseUser;
   UserModel? _currentUser;
@@ -262,8 +264,14 @@ class AuthProvider extends ChangeNotifier {
               'Failed to create user profile: $firestoreError');
         }
 
+        // Process referral using the referral service
         if (referrerId != null && referrerId.isNotEmpty) {
-          await _updateReferrer(referrerId, credential.user!.uid);
+          await _referralService.processReferral(
+            newUserId: credential.user!.uid,
+            referralCode: referrerId,
+            membershipFee: subscriptionFee,
+            userTier: tier.value,
+          );
         }
 
         try {
@@ -344,30 +352,6 @@ class AuthProvider extends ChangeNotifier {
     return memberId;
   }
 
-  // Update referrer's data
-  Future<void> _updateReferrer(
-      String referrerId, String newUserId) async {
-    try {
-      final referrerDoc =
-      await _firestore.collection('users').doc(referrerId).get();
-      if (referrerDoc.exists) {
-        final referrerData = referrerDoc.data()!;
-        List<String> referredUsers =
-        List<String>.from(referrerData['referredUsers'] ?? []);
-        referredUsers.add(newUserId);
-
-        await _firestore
-            .collection('users')
-            .doc(referrerId)
-            .update({
-          'referredUsers': referredUsers,
-          'updatedAt': Timestamp.now(),
-        });
-      }
-    } catch (e) {
-      print('Error updating referrer: $e');
-    }
-  }
 
   // Promote user to VIP
   Future<void> _promoteToVIP() async {

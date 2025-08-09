@@ -15,6 +15,7 @@ import '../admin/manage_borrow_requests_screen.dart';
 import '../admin/manage_users_screen.dart';
 import '../admin/manage_games_screen.dart';
 import '../../../services/suspension_service.dart';
+import '../../../services/balance_service.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -26,6 +27,7 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final SuspensionService _suspensionService = SuspensionService();
+  final BalanceService _balanceService = BalanceService();
 
   // Statistics
   int _totalMembers = 0;
@@ -234,9 +236,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  // Run periodic suspension checks and VIP promotions
+  // Run periodic suspension checks, balance expiry checks, and VIP promotions
   Future<void> _runPeriodicSuspensionCheck() async {
     try {
+      // Run balance expiry checks first
+      final balanceResult = await _balanceService.checkAndExpireBalances();
+      
       // Run suspension checks
       final suspensionResult = await _suspensionService.checkAndApplySuspensions();
       
@@ -245,6 +250,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
       
       // Show notifications if there are changes
       if (mounted) {
+        // Balance expiry notifications
+        if (balanceResult['expired'] > 0) {
+          print('Balance expiry check completed: ${balanceResult['expired']} entries expired for ${balanceResult['usersAffected']} users. Total: ${balanceResult['totalExpired']} LE');
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Balance expiry: ${balanceResult['expired']} entries expired (${balanceResult['totalExpired'].toStringAsFixed(0)} LE)',
+              ),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        
         if (suspensionResult['suspended'] > 0) {
           print('Suspension check completed: ${suspensionResult['suspended']} users suspended out of ${suspensionResult['checked']} checked');
           
@@ -274,7 +294,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         }
         
         // Refresh statistics if there were any changes
-        if (suspensionResult['suspended'] > 0 || vipResult['promoted'] > 0) {
+        if (balanceResult['expired'] > 0 || suspensionResult['suspended'] > 0 || vipResult['promoted'] > 0) {
           _loadStatistics();
         }
       }
