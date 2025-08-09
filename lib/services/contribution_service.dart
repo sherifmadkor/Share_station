@@ -2,12 +2,39 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
-import '../data/models/game_model.dart';
+// Import game_model with prefix to avoid Platform conflict
+import '../data/models/game_model.dart' as game_models;
 import '../data/models/user_model.dart';
 
+// Main service class for handling contributions
 class ContributionService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
+
+  // Helper method to calculate borrow limit based on shares
+  int _calculateBorrowLimit(int totalShares, int fundShares) {
+    // Based on BRD: Borrow limit increases with contributions
+    // 0-4 shares: 1 borrow
+    // 5-9 shares: 2 borrows
+    // 10-14 shares: 3 borrows
+    // 15+ shares with 5+ fund shares: 5 borrows (VIP)
+    // 15-19 shares: 4 borrows
+    // 20+ shares: 5 borrows
+
+    if (totalShares >= 15 && fundShares >= 5) {
+      return 5; // VIP status
+    } else if (totalShares >= 20) {
+      return 5;
+    } else if (totalShares >= 15) {
+      return 4;
+    } else if (totalShares >= 10) {
+      return 3;
+    } else if (totalShares >= 5) {
+      return 2;
+    } else {
+      return 1;
+    }
+  }
 
   // Submit a new contribution request
   Future<Map<String, dynamic>> submitContribution({
@@ -15,8 +42,8 @@ class ContributionService {
     required String userName,
     required String gameTitle,
     required List<String> includedTitles,
-    required List<Platform> platforms,
-    required List<AccountType> sharingOptions,
+    required List<game_models.Platform> platforms,
+    required List<game_models.AccountType> sharingOptions,
     required double gameValue,
     required String email,
     required String password,
@@ -32,8 +59,8 @@ class ContributionService {
         'userName': userName,
         'gameTitle': gameTitle,
         'includedTitles': includedTitles,
-        'platforms': platforms.map((p) => p.value).toList(), // Using .value
-        'sharingOptions': sharingOptions.map((a) => a.value).toList(), // Using .value
+        'platforms': platforms.map((p) => p.value).toList(),
+        'sharingOptions': sharingOptions.map((a) => a.value).toList(),
         'gameValue': gameValue,
         'credentials': {
           'email': email,
@@ -114,12 +141,37 @@ class ContributionService {
         .snapshots();
   }
 
+  // Get rejected contributions (for admin)
+  Stream<QuerySnapshot> getRejectedContributions() {
+    return _firestore
+        .collection('contribution_requests')
+        .where('status', isEqualTo: 'rejected')
+        .snapshots();
+  }
+
   // Get user's contributions
   Stream<QuerySnapshot> getUserContributions(String userId) {
     return _firestore
         .collection('contribution_requests')
         .where('userId', isEqualTo: userId)
-        .orderBy('submittedAt', descending: true)
+        .snapshots();
+  }
+
+  // Get user's pending contributions
+  Stream<QuerySnapshot> getUserPendingContributions(String userId) {
+    return _firestore
+        .collection('contribution_requests')
+        .where('userId', isEqualTo: userId)
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
+  }
+
+  // Get user's approved contributions
+  Stream<QuerySnapshot> getUserApprovedContributions(String userId) {
+    return _firestore
+        .collection('contribution_requests')
+        .where('userId', isEqualTo: userId)
+        .where('status', isEqualTo: 'approved')
         .snapshots();
   }
 
@@ -139,38 +191,35 @@ class ContributionService {
       }
 
       final data = requestDoc.data()!;
+      final gameTitle = data['gameTitle'];
+      final userId = data['userId'];
+      final gameValue = (data['gameValue'] ?? 0).toDouble();
 
-      // Update request status
-      batch.update(requestDoc.reference, {
-        'status': 'approved',
-        'approvedAt': FieldValue.serverTimestamp(),
-        'approvedBy': 'admin', // TODO: Get actual admin ID
-      });
+      // Parse platforms and sharing options
+      final platforms = (data['platforms'] as List<dynamic>)
+          .map((p) => game_models.Platform.fromString(p.toString()))
+          .toList();
 
-      // Generate unique account ID
+      final sharingOptions = (data['sharingOptions'] as List<dynamic>)
+          .map((a) => game_models.AccountType.fromString(a.toString()))
+          .toList();
+
+      // Generate account ID
       final accountId = _uuid.v4();
 
-      // Create slots based on platforms and sharing options
+      // Create slots based on platform and sharing option combinations
       Map<String, dynamic> slots = {};
-      List<Platform> platforms = (data['platforms'] as List)
-          .map((p) => Platform.fromString(p.toString()))
-          .toList();
-      List<AccountType> sharingOptions = (data['sharingOptions'] as List)
-          .map((a) => AccountType.fromString(a.toString()))
-          .toList();
-
       for (var platform in platforms) {
         for (var accountType in sharingOptions) {
-          final slotKey = '${platform.value}_${accountType.value}'; // Using .value
+          final slotKey = '${platform.value}_${accountType.value}';
           slots[slotKey] = {
-            'platform': platform.value, // Using .value
-            'accountType': accountType.value, // Using .value
-            'status': SlotStatus.available.value, // Using .value
+            'platform': platform.value,
+            'accountType': accountType.value,
+            'status': game_models.SlotStatus.available.value,
             'borrowerId': null,
+            'borrowerName': null,
             'borrowDate': null,
             'expectedReturnDate': null,
-            'reservationDate': null,
-            'reservedById': null,
           };
         }
       }
@@ -178,128 +227,174 @@ class ContributionService {
       // Check if game already exists
       final gameQuery = await _firestore
           .collection('games')
-          .where('title', isEqualTo: data['gameTitle'])
+          .where('title', isEqualTo: gameTitle)
           .limit(1)
           .get();
 
-      // Create the account object
-      final accountData = {
-        'accountId': accountId,
-        'contributorId': data['userId'],
-        'contributorName': data['userName'],
-        'platforms': data['platforms'], // Already stored as strings
-        'sharingOptions': data['sharingOptions'], // Already stored as strings
-        'credentials': data['credentials'],
-        'edition': data['edition'] ?? 'standard',
-        'region': data['region'] ?? 'US',
-        'status': 'available',
-        'slots': slots,
-        'gameValue': data['gameValue'],
-        'dateAdded': FieldValue.serverTimestamp(),
-        'isActive': true,
-      };
+      if (gameQuery.docs.isNotEmpty) {
+        // Game exists - add new account to existing game
+        final gameDoc = gameQuery.docs.first;
+        final gameData = gameDoc.data();
 
-      if (gameQuery.docs.isEmpty) {
-        // Create new game entry with this account
-        final gameRef = _firestore.collection('games').doc();
-        batch.set(gameRef, {
-          'gameId': gameRef.id,
-          'title': data['gameTitle'],
-          'includedTitles': data['includedTitles'] ?? [data['gameTitle']],
-          'coverImageUrl': data['coverImageUrl'],
-          'description': data['description'],
-          'lenderTier': LenderTier.member.value, // Using .value
-          'accounts': [accountData], // Array of accounts
-          'totalValue': data['gameValue'],
-          'totalAccounts': 1,
-          'availableAccounts': 1,
-          'createdAt': FieldValue.serverTimestamp(),
+        // Get existing accounts array or create new one
+        List<dynamic> accounts = gameData['accounts'] ?? [];
+
+        // Add new account (use DateTime.now() instead of serverTimestamp in array)
+        accounts.add({
+          'accountId': accountId,
+          'contributorId': data['userId'],
+          'contributorName': data['userName'],
+          'platforms': platforms.map((p) => p.value).toList(),
+          'sharingOptions': sharingOptions.map((a) => a.value).toList(),
+          'slots': slots,
+          'credentials': data['credentials'],
+          'gameValue': gameValue,
+          'edition': data['edition'] ?? 'standard',
+          'region': data['region'] ?? 'US',
+          'dateAdded': Timestamp.fromDate(DateTime.now()),
+        });
+
+        // Update game document
+        batch.update(gameDoc.reference, {
+          'accounts': accounts,
+          'totalAccounts': accounts.length,
+          'availableAccounts': FieldValue.increment(1),
+          'totalValue': FieldValue.increment(gameValue),
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } else {
-        // Add account to existing game
-        final gameDoc = gameQuery.docs.first;
-        batch.update(gameDoc.reference, {
-          'accounts': FieldValue.arrayUnion([accountData]),
-          'totalValue': FieldValue.increment(data['gameValue']),
-          'totalAccounts': FieldValue.increment(1),
-          'availableAccounts': FieldValue.increment(1),
+        // Create new game with first account
+        final gameId = _uuid.v4();
+        final gameData = {
+          'gameId': gameId,
+          'title': gameTitle,
+          'includedTitles': data['includedTitles'] ?? [gameTitle],
+          'coverImageUrl': data['coverImageUrl'],
+          'description': data['description'],
+          'lenderTier': 'member', // Member contributed games
+          'accounts': [{
+            'accountId': accountId,
+            'contributorId': data['userId'],
+            'contributorName': data['userName'],
+            'platforms': platforms.map((p) => p.value).toList(),
+            'sharingOptions': sharingOptions.map((a) => a.value).toList(),
+            'slots': slots,
+            'credentials': data['credentials'],
+            'gameValue': gameValue,
+            'edition': data['edition'] ?? 'standard',
+            'region': data['region'] ?? 'US',
+            'dateAdded': Timestamp.fromDate(DateTime.now()),
+          }],
+          'totalAccounts': 1,
+          'availableAccounts': 1,
+          'totalValue': gameValue,
+          'dateAdded': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
-        });
+          'isActive': true,
+        };
+
+        batch.set(_firestore.collection('games').doc(gameId), gameData);
       }
 
       // Update user metrics
-      final userRef = _firestore.collection('users').doc(data['userId']);
+      final userRef = _firestore.collection('users').doc(userId);
+      final userDoc = await userRef.get();
 
-      // Determine share count based on account types
-      double shareCount = 0;
-      Map<String, int> shareBreakdown = {};
+      if (!userDoc.exists) {
+        return {'success': false, 'message': 'User not found'};
+      }
 
+      final userData = userDoc.data()!;
+
+      // Calculate share counts based on account types
+      double totalShares = 0;
       for (var accountType in sharingOptions) {
-        shareCount += accountType.shareValue; // Using the shareValue getter
+        totalShares += accountType.shareValue;
+      }
 
-        switch (accountType) {
-          case AccountType.full:
-            shareBreakdown['full'] = (shareBreakdown['full'] ?? 0) + 1;
-            break;
-          case AccountType.primary:
-            shareBreakdown['primary'] = (shareBreakdown['primary'] ?? 0) + 1;
-            break;
-          case AccountType.secondary:
-            shareBreakdown['secondary'] = (shareBreakdown['secondary'] ?? 0) + 1;
-            break;
-          case AccountType.psPlus:
-            shareBreakdown['psplus'] = (shareBreakdown['psplus'] ?? 0) + 1;
-            break;
-        }
+      // Create balance entry for 70% of game value (expires in 90 days)
+      final balanceEntryId = _uuid.v4();
+      final now = DateTime.now();
+      final balanceEntry = {
+        'id': balanceEntryId,
+        'type': 'borrowValue',
+        'amount': gameValue * 0.7,
+        'description': 'Contribution: $gameTitle',
+        'date': Timestamp.fromDate(now),
+        'expiryDate': Timestamp.fromDate(now.add(Duration(days: 90))),
+        'isExpired': false,
+      };
+
+      // Get existing balance entries
+      List<dynamic> balanceEntries = userData['balanceEntries'] ?? [];
+      balanceEntries.add(balanceEntry);
+
+      // Calculate new borrow limit based on total shares
+      final currentGameShares = (userData['gameShares'] ?? 0).toDouble();
+      final currentFundShares = (userData['fundShares'] ?? 0).toDouble();
+      final newGameShares = currentGameShares + totalShares;
+      final newTotalShares = newGameShares + currentFundShares;
+
+      // Borrow limit calculation based on BRD rules
+      int newBorrowLimit = _calculateBorrowLimit(
+          newTotalShares.toInt(),
+          currentFundShares.toInt()
+      );
+
+      // Check for VIP promotion
+      bool shouldPromoteToVIP = false;
+      String newTier = userData['tier'] ?? 'member';
+
+      if (newTier != 'vip' && newTotalShares >= 15 && currentFundShares >= 5) {
+        shouldPromoteToVIP = true;
+        newTier = 'vip';
+        newBorrowLimit = 5; // VIP gets 5 simultaneous borrows
       }
 
       // Update user document
-      batch.update(userRef, {
-        'gameShares': FieldValue.increment(shareCount),
-        'totalShares': FieldValue.increment(shareCount),
-        'shareBreakdown.full': FieldValue.increment(shareBreakdown['full'] ?? 0),
-        'shareBreakdown.primary': FieldValue.increment(shareBreakdown['primary'] ?? 0),
-        'shareBreakdown.secondary': FieldValue.increment(shareBreakdown['secondary'] ?? 0),
-        'shareBreakdown.psplus': FieldValue.increment(shareBreakdown['psplus'] ?? 0),
-        'stationLimit': FieldValue.increment(data['gameValue']),
-        'remainingStationLimit': FieldValue.increment(data['gameValue']),
-        'borrowValue': FieldValue.increment(data['gameValue'] * 0.7), // 70% balance
+      Map<String, dynamic> userUpdates = {
+        'stationLimit': FieldValue.increment(gameValue),
+        'gameShares': newGameShares,
+        'totalShares': newTotalShares,
+        'borrowLimit': newBorrowLimit,
+        'balanceEntries': balanceEntries,
         'lastActivityDate': FieldValue.serverTimestamp(),
-        'coldPeriodDays': 0, // Reset cold period
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // Check for VIP promotion
-      final userDoc = await userRef.get();
-      if (userDoc.exists) {
-        final userData = userDoc.data()!;
-        final totalShares = userData['totalShares'] ?? 0;
-        final fundShares = userData['fundShares'] ?? 0;
-        final currentTier = userData['tier'] ?? 'member';
-
-        if (totalShares >= 15 && fundShares >= 5 && currentTier == 'member') {
-          batch.update(userRef, {
-            'tier': UserTier.vip.value, // Using .value
-            'promotedToVipAt': FieldValue.serverTimestamp(),
-          });
-        }
-
-        // Update borrow limit based on total shares
-        final newBorrowLimit = UserModel.calculateBorrowLimit(
-            totalShares.toInt(),
-            UserTier.fromString(currentTier)
-        );
-        batch.update(userRef, {
-          'borrowLimit': newBorrowLimit,
-        });
+      if (shouldPromoteToVIP) {
+        userUpdates['tier'] = 'vip';
+        userUpdates['vipPromotionDate'] = FieldValue.serverTimestamp();
       }
 
+      // Add share breakdown updates
+      for (var accountType in sharingOptions) {
+        String shareKey = 'shares${accountType.value.substring(0, 1).toUpperCase()}${accountType.value.substring(1)}';
+        userUpdates[shareKey] = FieldValue.increment(accountType.shareValue);
+      }
+
+      batch.update(userRef, userUpdates);
+
+      // Update contribution request status
+      batch.update(requestDoc.reference, {
+        'status': 'approved',
+        'approvedAt': FieldValue.serverTimestamp(),
+        'approvedBy': 'admin', // You can pass actual admin ID
+      });
+
+      // Commit all changes
       await batch.commit();
+
+      String message = 'Contribution approved successfully!';
+      if (shouldPromoteToVIP) {
+        message += ' User has been promoted to VIP!';
+      }
 
       return {
         'success': true,
-        'message': 'Game contribution approved successfully!',
+        'message': message,
+        'vipPromotion': shouldPromoteToVIP,
       };
     } catch (e) {
       print('Error approving contribution: $e');
@@ -322,83 +417,83 @@ class ContributionService {
           .get();
 
       if (!requestDoc.exists) {
-        return {'success': false, 'message': 'Fund contribution request not found'};
+        return {'success': false, 'message': 'Contribution request not found'};
       }
 
       final data = requestDoc.data()!;
+      final userId = data['userId'];
+      final amount = (data['amount'] ?? 0).toDouble();
+      final gameTitle = data['gameTitle'];
 
-      // Update request status
+      // Update user metrics
+      final userRef = _firestore.collection('users').doc(userId);
+      final userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        return {'success': false, 'message': 'User not found'};
+      }
+
+      final userData = userDoc.data()!;
+
+      // Fund shares count as 1 share each
+      final currentFundShares = (userData['fundShares'] ?? 0).toDouble();
+      final currentGameShares = (userData['gameShares'] ?? 0).toDouble();
+      final newFundShares = currentFundShares + 1;
+      final newTotalShares = currentGameShares + newFundShares;
+
+      // Calculate new borrow limit based on BRD rules
+      int newBorrowLimit = _calculateBorrowLimit(
+          newTotalShares.toInt(),
+          newFundShares.toInt()
+      );
+
+      // Check for VIP promotion
+      bool shouldPromoteToVIP = false;
+      String newTier = userData['tier'] ?? 'member';
+
+      if (newTier != 'vip' && newTotalShares >= 15 && newFundShares >= 5) {
+        shouldPromoteToVIP = true;
+        newTier = 'vip';
+        newBorrowLimit = 5;
+      }
+
+      // Update user document
+      Map<String, dynamic> userUpdates = {
+        'stationLimit': FieldValue.increment(amount),
+        'fundShares': newFundShares,
+        'totalShares': newTotalShares,
+        'borrowLimit': newBorrowLimit,
+        'lastActivityDate': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (shouldPromoteToVIP) {
+        userUpdates['tier'] = 'vip';
+        userUpdates['vipPromotionDate'] = FieldValue.serverTimestamp();
+      }
+
+      batch.update(userRef, userUpdates);
+
+      // Update contribution request status
       batch.update(requestDoc.reference, {
         'status': 'approved',
         'approvedAt': FieldValue.serverTimestamp(),
         'approvedBy': 'admin',
       });
 
-      // Update user metrics
-      final userRef = _firestore.collection('users').doc(data['userId']);
-      batch.update(userRef, {
-        'fundShares': FieldValue.increment(1),
-        'totalShares': FieldValue.increment(1),
-        'totalFunds': FieldValue.increment(data['amount']),
-        'stationLimit': FieldValue.increment(data['amount']),
-        'remainingStationLimit': FieldValue.increment(data['amount']),
-        'lastActivityDate': FieldValue.serverTimestamp(),
-        'coldPeriodDays': 0,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      // Check if this fund contribution is for a vault game
-      if (data['gameTitle'] != null && data['gameTitle'] != '') {
-        // Check if vault game exists or create it
-        final vaultQuery = await _firestore
-            .collection('games')
-            .where('title', isEqualTo: data['gameTitle'])
-            .where('lenderTier', isEqualTo: LenderTier.gamesVault.value)
-            .limit(1)
-            .get();
-
-        if (vaultQuery.docs.isNotEmpty) {
-          // Add contributor to existing vault game
-          final vaultDoc = vaultQuery.docs.first;
-          batch.update(vaultDoc.reference, {
-            'fundContributors': FieldValue.arrayUnion([data['userId']]),
-            'contributorShares.${data['userId']}': FieldValue.increment(data['amount']),
-            'totalValue': FieldValue.increment(data['amount']),
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-        }
-      }
-
-      // Check for VIP promotion
-      final userDoc = await userRef.get();
-      if (userDoc.exists) {
-        final userData = userDoc.data()!;
-        final totalShares = userData['totalShares'] ?? 0;
-        final fundShares = userData['fundShares'] ?? 0;
-        final currentTier = userData['tier'] ?? 'member';
-
-        if (totalShares >= 15 && fundShares >= 5 && currentTier == 'member') {
-          batch.update(userRef, {
-            'tier': UserTier.vip.value, // Using .value
-            'promotedToVipAt': FieldValue.serverTimestamp(),
-          });
-        }
-
-        // Update borrow limit
-        final newBorrowLimit = UserModel.calculateBorrowLimit(
-            totalShares.toInt(),
-            UserTier.fromString(currentTier)
-        );
-        batch.update(userRef, {
-          'borrowLimit': newBorrowLimit,
-        });
-      }
+      // TODO: Add fund contribution to games_vault collection if needed
 
       await batch.commit();
 
+      String message = 'Fund contribution approved successfully!';
+      if (shouldPromoteToVIP) {
+        message += ' User has been promoted to VIP!';
+      }
+
       return {
         'success': true,
-        'message': 'Fund contribution approved successfully!',
+        'message': message,
+        'vipPromotion': shouldPromoteToVIP,
       };
     } catch (e) {
       print('Error approving fund contribution: $e');
@@ -424,7 +519,7 @@ class ContributionService {
 
       return {
         'success': true,
-        'message': 'Contribution rejected.',
+        'message': 'Contribution rejected',
       };
     } catch (e) {
       print('Error rejecting contribution: $e');
@@ -435,64 +530,10 @@ class ContributionService {
     }
   }
 
-  // Calculate user scores (C, F, H, E scores)
-  Future<void> calculateUserScores(String tier) async {
+  // Get contribution statistics for admin dashboard
+  Future<Map<String, dynamic>> getContributionStatistics() async {
     try {
-      // Get all active users in the tier
-      final usersQuery = await _firestore
-          .collection('users')
-          .where('tier', isEqualTo: tier)
-          .where('status', isEqualTo: UserStatus.active.value) // Using .value
-          .get();
-
-      final users = usersQuery.docs;
-
-      // Sort by different metrics and assign scores
-      // C Score - Total Shares ranking
-      users.sort((a, b) => (b['totalShares'] ?? 0).compareTo(a['totalShares'] ?? 0));
-      for (int i = 0; i < users.length; i++) {
-        await users[i].reference.update({'cScore': i + 1});
-      }
-
-      // F Score - Fund Shares ranking
-      users.sort((a, b) => (b['totalFunds'] ?? 0).compareTo(a['totalFunds'] ?? 0));
-      for (int i = 0; i < users.length; i++) {
-        await users[i].reference.update({'fScore': i + 1});
-      }
-
-      // H Score - Average Hold Period ranking
-      users.sort((a, b) => (b['averageHoldPeriod'] ?? 0).compareTo(a['averageHoldPeriod'] ?? 0));
-      for (int i = 0; i < users.length; i++) {
-        await users[i].reference.update({'hScore': i + 1});
-      }
-
-      // E Score - Net Exchange ranking
-      users.sort((a, b) => (b['netExchange'] ?? 0).compareTo(a['netExchange'] ?? 0));
-      for (int i = 0; i < users.length; i++) {
-        await users[i].reference.update({'eScore': i + 1});
-      }
-
-      // Calculate overall score for each user
-      for (var user in users) {
-        final data = user.data();
-        final cScore = data['cScore'] ?? 0;
-        final fScore = data['fScore'] ?? 0;
-        final hScore = data['hScore'] ?? 0;
-        final eScore = data['eScore'] ?? 0;
-
-        final overallScore = (cScore * 0.2) + (fScore * 0.35) +
-            (hScore * 0.1) + (eScore * 0.35);
-
-        await user.reference.update({'overallScore': overallScore});
-      }
-    } catch (e) {
-      print('Error calculating scores: $e');
-    }
-  }
-
-  // Get contribution statistics for dashboard
-  Future<Map<String, int>> getContributionStats() async {
-    try {
+      // Get counts for each status
       final pending = await _firestore
           .collection('contribution_requests')
           .where('status', isEqualTo: 'pending')
@@ -512,13 +553,13 @@ class ContributionService {
           .get();
 
       return {
-        'pending': pending.count,
-        'approved': approved.count,
-        'rejected': rejected.count,
-        'total': pending.count + approved.count + rejected.count,
+        'pending': pending.count ?? 0,
+        'approved': approved.count ?? 0,
+        'rejected': rejected.count ?? 0,
+        'total': (pending.count ?? 0) + (approved.count ?? 0) + (rejected.count ?? 0),
       };
     } catch (e) {
-      print('Error getting contribution stats: $e');
+      print('Error getting contribution statistics: $e');
       return {
         'pending': 0,
         'approved': 0,

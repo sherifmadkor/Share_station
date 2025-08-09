@@ -2,58 +2,64 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
-import '../data/models/game_model.dart';
-import '../data/models/user_model.dart' hide Platform;
+// Import with prefix to avoid conflicts
+import '../data/models/game_model.dart' as game_models;
+import '../data/models/user_model.dart';
 
 class BorrowService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
 
-  // Submit a borrow request (by member)
+  // Submit a borrow request
   Future<Map<String, dynamic>> submitBorrowRequest({
     required String userId,
     required String userName,
     required String gameId,
     required String gameTitle,
     required String accountId,
-    required Platform platform,
-    required AccountType accountType,
-    required double borrowValue, // Changed from gameValue to borrowValue
+    required game_models.Platform platform,
+    required game_models.AccountType accountType,
+    required double borrowValue, // This is the game's value
   }) async {
     try {
-      // Calculate actual borrow value based on account type
-      final actualBorrowValue = borrowValue * accountType.borrowMultiplier;
-
-      // Check user's station limit
+      // Get user data to validate eligibility
       final userDoc = await _firestore.collection('users').doc(userId).get();
+
       if (!userDoc.exists) {
-        return {
-          'success': false,
-          'message': 'User not found',
-        };
+        return {'success': false, 'message': 'User not found'};
       }
 
       final userData = userDoc.data()!;
-      final remainingLimit = userData['remainingStationLimit'] ?? 0;
 
-      if (remainingLimit < actualBorrowValue) {
+      // Calculate actual borrow value based on account type
+      final actualBorrowValue = borrowValue * accountType.borrowMultiplier;
+
+      // Check station limit
+      final remainingStationLimit = (userData['remainingStationLimit'] ?? userData['stationLimit'] ?? 0).toDouble();
+      if (remainingStationLimit < actualBorrowValue) {
         return {
           'success': false,
-          'message': 'Insufficient Station Limit. You need ${actualBorrowValue} LE but only have ${remainingLimit} LE available.',
+          'message': 'Insufficient Station Limit. Required: ${actualBorrowValue.toStringAsFixed(0)} LE, Available: ${remainingStationLimit.toStringAsFixed(0)} LE',
         };
       }
 
-      // Check borrow limit
-      final currentBorrows = userData['currentBorrows'] ?? 0;
-      final borrowLimit = userData['borrowLimit'] ?? 1;
+      // Check borrow limit (simultaneous borrows)
+      final currentBorrows = (userData['currentBorrows'] ?? 0).toDouble();
+      final borrowLimit = (userData['borrowLimit'] ?? 1).toDouble();
 
-      // Calculate effective borrow count based on account type
-      double effectiveBorrowCount = accountType.borrowLimitImpact;
-
-      if (currentBorrows + effectiveBorrowCount > borrowLimit) {
+      if (currentBorrows >= borrowLimit) {
         return {
           'success': false,
-          'message': 'You have reached your borrowing limit of $borrowLimit games.',
+          'message': 'You have reached your borrow limit of ${borrowLimit.toInt()} simultaneous borrows',
+        };
+      }
+
+      // Check if user is suspended
+      final status = userData['status'] ?? 'active';
+      if (status == 'suspended') {
+        return {
+          'success': false,
+          'message': 'Your account is suspended. Please contact admin.',
         };
       }
 
@@ -103,7 +109,7 @@ class BorrowService {
     }
   }
 
-  // Get user's active borrows - ADDED METHOD
+  // Get user's active borrows - THIS IS THE MISSING METHOD
   Future<List<Map<String, dynamic>>> getUserActiveBorrows(String userId) async {
     try {
       final query = await _firestore
@@ -123,40 +129,12 @@ class BorrowService {
     }
   }
 
-  // Get pending borrow requests (for admin)
-  Stream<QuerySnapshot> getPendingBorrowRequests() {
-    return _firestore
-        .collection('borrow_requests')
-        .where('status', isEqualTo: 'pending')
-        .orderBy('requestDate', descending: true)
-        .snapshots();
-  }
-
-  // Get active borrows
-  Stream<QuerySnapshot> getActiveBorrows() {
-    return _firestore
-        .collection('borrow_requests')
-        .where('status', isEqualTo: 'approved')
-        .orderBy('approvalDate', descending: true)
-        .snapshots();
-  }
-
-  // Get user's borrow requests (all statuses)
-  Stream<QuerySnapshot> getUserBorrowRequests(String userId) {
-    return _firestore
-        .collection('borrow_requests')
-        .where('userId', isEqualTo: userId)
-        .orderBy('requestDate', descending: true)
-        .snapshots();
-  }
-
-  // Get user's borrow history
+  // Get user's borrow history (all statuses)
   Future<List<Map<String, dynamic>>> getUserBorrowHistory(String userId) async {
     try {
       final query = await _firestore
           .collection('borrow_requests')
           .where('userId', isEqualTo: userId)
-          .orderBy('requestDate', descending: true)
           .get();
 
       return query.docs.map((doc) {
@@ -170,85 +148,126 @@ class BorrowService {
     }
   }
 
-  // Approve borrow request (admin)
+  // Get pending borrow requests (for admin)
+  Stream<QuerySnapshot> getPendingBorrowRequests() {
+    return _firestore
+        .collection('borrow_requests')
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
+  }
+
+  // Get active borrows (approved and not returned)
+  Stream<QuerySnapshot> getActiveBorrows() {
+    return _firestore
+        .collection('borrow_requests')
+        .where('status', isEqualTo: 'approved')
+        .snapshots();
+  }
+
+  // Get overdue borrows
+  Future<List<Map<String, dynamic>>> getOverdueBorrows() async {
+    try {
+      final thirtyDaysAgo = DateTime.now().subtract(Duration(days: 30));
+
+      final query = await _firestore
+          .collection('borrow_requests')
+          .where('status', isEqualTo: 'approved')
+          .where('approvalDate', isLessThan: Timestamp.fromDate(thirtyDaysAgo))
+          .get();
+
+      return query.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+
+        // Calculate days overdue
+        final approvalDate = (data['approvalDate'] as Timestamp).toDate();
+        final daysBorrowed = DateTime.now().difference(approvalDate).inDays;
+        data['daysOverdue'] = daysBorrowed - 30;
+
+        return data;
+      }).toList();
+    } catch (e) {
+      print('Error getting overdue borrows: $e');
+      return [];
+    }
+  }
+
+  // Approve borrow request
   Future<Map<String, dynamic>> approveBorrowRequest(String requestId) async {
     try {
       final batch = _firestore.batch();
 
       // Get the borrow request
-      final requestQuery = await _firestore
+      final requestDoc = await _firestore
           .collection('borrow_requests')
-          .where('requestId', isEqualTo: requestId)
-          .limit(1)
+          .doc(requestId)
           .get();
 
-      if (requestQuery.docs.isEmpty) {
+      if (!requestDoc.exists) {
         return {'success': false, 'message': 'Borrow request not found'};
       }
 
-      final requestDoc = requestQuery.docs.first;
-      final data = requestDoc.data();
+      final data = requestDoc.data()!;
 
       // Update request status
       batch.update(requestDoc.reference, {
         'status': 'approved',
         'approvalDate': FieldValue.serverTimestamp(),
-        'approvedBy': 'admin',
-        'expectedReturnDate': Timestamp.fromDate(
-          DateTime.now().add(Duration(days: 30)), // 30 days borrow period
-        ),
+        'approvedBy': 'admin', // You can pass actual admin ID
       });
 
-      // Update game account slot status
-      final gameDoc = await _firestore
-          .collection('games')
-          .doc(data['gameId'])
-          .get();
+      // Update game slot status and get account data
+      final gameDoc = await _firestore.collection('games').doc(data['gameId']).get();
 
-      if (!gameDoc.exists) {
-        return {'success': false, 'message': 'Game not found'};
+      String? contributorId;
+      if (gameDoc.exists) {
+        final gameData = gameDoc.data()!;
+        final accounts = List<Map<String, dynamic>>.from(gameData['accounts'] ?? []);
+
+        // Find the specific account and update its slot
+        int accountIndex = accounts.indexWhere((acc) => acc['accountId'] == data['accountId']);
+        if (accountIndex == -1) {
+          return {'success': false, 'message': 'Account not found in game'};
+        }
+
+        final slotKey = '${data['platform']}_${data['accountType']}';
+
+        // Update the slot status in the account
+        if (accounts[accountIndex]['slots'] == null) {
+          accounts[accountIndex]['slots'] = {};
+        }
+
+        accounts[accountIndex]['slots'][slotKey] = {
+          'platform': data['platform'],
+          'accountType': data['accountType'],
+          'status': game_models.SlotStatus.taken.value,
+          'borrowerId': data['userId'],
+          'borrowerName': data['userName'],
+          'borrowDate': Timestamp.fromDate(DateTime.now()),
+          'expectedReturnDate': Timestamp.fromDate(
+            DateTime.now().add(Duration(days: 30)),
+          ),
+        };
+
+        // Get contributor ID for lending metrics update
+        final accountData = accounts[accountIndex];
+        contributorId = accountData['contributorId'];
+
+        // Update the game document with modified accounts array
+        batch.update(gameDoc.reference, {
+          'accounts': accounts,
+          'availableAccounts': FieldValue.increment(-1),
+          'currentBorrows': FieldValue.increment(1),
+          'totalBorrows': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       }
-
-      final gameData = gameDoc.data()!;
-      final accounts = List<Map<String, dynamic>>.from(gameData['accounts'] ?? []);
-
-      // Find the specific account and update its slot
-      int accountIndex = accounts.indexWhere((acc) => acc['accountId'] == data['accountId']);
-      if (accountIndex == -1) {
-        return {'success': false, 'message': 'Account not found in game'};
-      }
-
-      final slotKey = '${data['platform']}_${data['accountType']}';
-
-      // Update the slot status in the account
-      if (accounts[accountIndex]['slots'] == null) {
-        accounts[accountIndex]['slots'] = {};
-      }
-
-      accounts[accountIndex]['slots'][slotKey] = {
-        'platform': data['platform'],
-        'accountType': data['accountType'],
-        'status': SlotStatus.taken.value,
-        'borrowerId': data['userId'],
-        'borrowerName': data['userName'],
-        'borrowDate': FieldValue.serverTimestamp(),
-        'expectedReturnDate': Timestamp.fromDate(
-          DateTime.now().add(Duration(days: 30)),
-        ),
-      };
-
-      // Update the game document with modified accounts array
-      batch.update(gameDoc.reference, {
-        'accounts': accounts,
-        'availableAccounts': FieldValue.increment(-1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
 
       // Update user metrics
       final userRef = _firestore.collection('users').doc(data['userId']);
 
       // Calculate borrow count based on account type
-      final accountType = AccountType.fromString(data['accountType']);
+      final accountType = game_models.AccountType.fromString(data['accountType']);
       double borrowCount = accountType.borrowLimitImpact;
 
       batch.update(userRef, {
@@ -263,7 +282,7 @@ class BorrowService {
       });
 
       // Set cooldown for primary or full account borrows
-      if (accountType == AccountType.primary || accountType == AccountType.full) {
+      if (accountType == game_models.AccountType.primary || accountType == game_models.AccountType.full) {
         batch.update(userRef, {
           'coolDownEligible': false,
           'coolDownEndDate': Timestamp.fromDate(
@@ -272,21 +291,17 @@ class BorrowService {
         });
       }
 
-      // Update contributor's metrics (lending)
-      final accountData = accounts[accountIndex];
-      final contributorId = accountData['contributorId'];
+      // Update contributor's lending metrics
       if (contributorId != null && contributorId != data['userId']) {
         final contributorRef = _firestore.collection('users').doc(contributorId);
         batch.update(contributorRef, {
-          'netLendings': FieldValue.increment(data['borrowValue']),
-          'updatedAt': FieldValue.serverTimestamp(),
+          'netLending': FieldValue.increment(data['borrowValue']),
+          'totalLendings': FieldValue.increment(1),
         });
       }
 
-      // Create a borrow history entry
-      final borrowHistoryRef = _firestore.collection('borrow_history').doc();
-      batch.set(borrowHistoryRef, {
-        'borrowId': borrowHistoryRef.id,
+      // Create borrow history entry
+      final historyData = {
         'requestId': requestId,
         'userId': data['userId'],
         'userName': data['userName'],
@@ -296,13 +311,14 @@ class BorrowService {
         'platform': data['platform'],
         'accountType': data['accountType'],
         'borrowValue': data['borrowValue'],
+        'status': 'active',
         'borrowDate': FieldValue.serverTimestamp(),
         'expectedReturnDate': Timestamp.fromDate(
           DateTime.now().add(Duration(days: 30)),
         ),
-        'status': 'active',
-        'contributorId': contributorId,
-      });
+      };
+
+      batch.set(_firestore.collection('borrow_history').doc(), historyData);
 
       await batch.commit();
 
@@ -319,29 +335,52 @@ class BorrowService {
     }
   }
 
-  // Return a borrowed game
+  // Reject borrow request
+  Future<Map<String, dynamic>> rejectBorrowRequest(
+      String requestId,
+      String reason,
+      ) async {
+    try {
+      await _firestore.collection('borrow_requests').doc(requestId).update({
+        'status': 'rejected',
+        'rejectedAt': FieldValue.serverTimestamp(),
+        'rejectedBy': 'admin',
+        'rejectionReason': reason,
+      });
+
+      return {
+        'success': true,
+        'message': 'Borrow request rejected',
+      };
+    } catch (e) {
+      print('Error rejecting borrow request: $e');
+      return {
+        'success': false,
+        'message': 'Failed to reject borrow request: $e',
+      };
+    }
+  }
+
+  // Return borrowed game
   Future<Map<String, dynamic>> returnBorrowedGame(String requestId) async {
     try {
       final batch = _firestore.batch();
 
       // Get the borrow request
-      final requestQuery = await _firestore
+      final requestDoc = await _firestore
           .collection('borrow_requests')
-          .where('requestId', isEqualTo: requestId)
-          .where('status', isEqualTo: 'approved')
-          .limit(1)
+          .doc(requestId)
           .get();
 
-      if (requestQuery.docs.isEmpty) {
-        return {'success': false, 'message': 'Active borrow not found'};
+      if (!requestDoc.exists) {
+        return {'success': false, 'message': 'Borrow request not found'};
       }
 
-      final requestDoc = requestQuery.docs.first;
-      final data = requestDoc.data();
+      final data = requestDoc.data()!;
 
       // Calculate hold period
-      final borrowDate = (data['approvalDate'] as Timestamp).toDate();
-      final holdPeriod = DateTime.now().difference(borrowDate).inDays;
+      final approvalDate = (data['approvalDate'] as Timestamp).toDate();
+      final holdPeriod = DateTime.now().difference(approvalDate).inDays;
 
       // Update request status
       batch.update(requestDoc.reference, {
@@ -350,11 +389,8 @@ class BorrowService {
         'holdPeriod': holdPeriod,
       });
 
-      // Update game account slot status
-      final gameDoc = await _firestore
-          .collection('games')
-          .doc(data['gameId'])
-          .get();
+      // Update game slot status
+      final gameDoc = await _firestore.collection('games').doc(data['gameId']).get();
 
       if (gameDoc.exists) {
         final gameData = gameDoc.data()!;
@@ -368,7 +404,7 @@ class BorrowService {
             accounts[accountIndex]['slots'][slotKey] = {
               'platform': data['platform'],
               'accountType': data['accountType'],
-              'status': SlotStatus.available.value,
+              'status': game_models.SlotStatus.available.value,
               'borrowerId': null,
               'borrowerName': null,
               'borrowDate': null,
@@ -379,6 +415,7 @@ class BorrowService {
           batch.update(gameDoc.reference, {
             'accounts': accounts,
             'availableAccounts': FieldValue.increment(1),
+            'currentBorrows': FieldValue.increment(-1),
             'updatedAt': FieldValue.serverTimestamp(),
           });
         }
@@ -388,7 +425,7 @@ class BorrowService {
       final userRef = _firestore.collection('users').doc(data['userId']);
 
       // Calculate borrow count based on account type
-      final accountType = AccountType.fromString(data['accountType']);
+      final accountType = game_models.AccountType.fromString(data['accountType']);
       double borrowCount = accountType.borrowLimitImpact;
 
       // Get current user data to update average hold period
@@ -396,7 +433,7 @@ class BorrowService {
       if (userDoc.exists) {
         final userData = userDoc.data()!;
         final totalBorrows = userData['totalBorrowsCount'] ?? 1;
-        final currentAverage = userData['averageHoldPeriod'] ?? 0;
+        final currentAverage = (userData['averageHoldPeriod'] ?? 0).toDouble();
         final newAverage = ((currentAverage * (totalBorrows - 1)) + holdPeriod) / totalBorrows;
 
         batch.update(userRef, {
@@ -438,122 +475,10 @@ class BorrowService {
     }
   }
 
-  // Reject borrow request
-  Future<Map<String, dynamic>> rejectBorrowRequest(
-      String requestId,
-      String reason,
-      ) async {
+  // Get borrow statistics for admin dashboard
+  Future<Map<String, dynamic>> getBorrowStatistics() async {
     try {
-      final requestQuery = await _firestore
-          .collection('borrow_requests')
-          .where('requestId', isEqualTo: requestId)
-          .limit(1)
-          .get();
-
-      if (requestQuery.docs.isEmpty) {
-        return {'success': false, 'message': 'Borrow request not found'};
-      }
-
-      await requestQuery.docs.first.reference.update({
-        'status': 'rejected',
-        'rejectedAt': FieldValue.serverTimestamp(),
-        'rejectedBy': 'admin',
-        'rejectionReason': reason,
-      });
-
-      return {
-        'success': true,
-        'message': 'Borrow request rejected.',
-      };
-    } catch (e) {
-      print('Error rejecting borrow request: $e');
-      return {
-        'success': false,
-        'message': 'Failed to reject borrow request: $e',
-      };
-    }
-  }
-
-  // Check if user can borrow (validation)
-  Future<Map<String, dynamic>> validateBorrowEligibility(
-      String userId,
-      double borrowValue,
-      AccountType accountType,
-      ) async {
-    try {
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-
-      if (!userDoc.exists) {
-        return {'eligible': false, 'reason': 'User not found'};
-      }
-
-      final userData = userDoc.data()!;
-
-      // Check suspension
-      if (userData['status'] == UserStatus.suspended.value) {
-        return {'eligible': false, 'reason': 'Your account is suspended'};
-      }
-
-      // Calculate actual borrow value
-      final actualBorrowValue = borrowValue * accountType.borrowMultiplier;
-
-      // Check station limit
-      final remainingLimit = userData['remainingStationLimit'] ?? 0;
-      if (remainingLimit < actualBorrowValue) {
-        return {
-          'eligible': false,
-          'reason': 'Insufficient Station Limit (Need: ${actualBorrowValue} LE, Have: ${remainingLimit} LE)',
-        };
-      }
-
-      // Check borrow limit
-      final currentBorrows = userData['currentBorrows'] ?? 0;
-      final borrowLimit = userData['borrowLimit'] ?? 1;
-
-      double effectiveBorrowCount = accountType.borrowLimitImpact;
-
-      if (currentBorrows + effectiveBorrowCount > borrowLimit) {
-        return {
-          'eligible': false,
-          'reason': 'Borrow limit reached ($currentBorrows/$borrowLimit)',
-        };
-      }
-
-      // Check cooldown
-      final coolDownEndDate = userData['coolDownEndDate'];
-      if (coolDownEndDate != null) {
-        final coolDownEnd = (coolDownEndDate as Timestamp).toDate();
-        if (coolDownEnd.isAfter(DateTime.now())) {
-          final daysRemaining = coolDownEnd.difference(DateTime.now()).inDays;
-          return {
-            'eligible': false,
-            'reason': 'In cooldown period ($daysRemaining days remaining)',
-          };
-        }
-      }
-
-      // Check if user is a client with free borrowings
-      final userTier = UserTier.fromString(userData['tier'] ?? 'user');
-      if (userTier == UserTier.client) {
-        final freeBorrowings = userData['freeborrowings'] ?? 0;
-        return {
-          'eligible': true,
-          'reason': 'Eligible to borrow',
-          'useFreeBorrow': freeBorrowings > 0,
-          'freeBorrowingsRemaining': freeBorrowings,
-        };
-      }
-
-      return {'eligible': true, 'reason': 'Eligible to borrow'};
-    } catch (e) {
-      print('Error validating borrow eligibility: $e');
-      return {'eligible': false, 'reason': 'Error checking eligibility'};
-    }
-  }
-
-  // Get borrow statistics for dashboard
-  Future<Map<String, int>> getBorrowStats() async {
-    try {
+      // Get counts
       final pending = await _firestore
           .collection('borrow_requests')
           .where('status', isEqualTo: 'pending')
@@ -566,73 +491,22 @@ class BorrowService {
           .count()
           .get();
 
-      final returned = await _firestore
-          .collection('borrow_requests')
-          .where('status', isEqualTo: 'returned')
-          .count()
-          .get();
-
-      // Safely handle nulls using the ?? operator
-      final pendingCount = pending.count ?? 0;
-      final activeCount = active.count ?? 0;
-      final returnedCount = returned.count ?? 0;
+      final overdue = await getOverdueBorrows();
 
       return {
-        'pending': pendingCount,
-        'active': activeCount,
-        'returned': returnedCount,
-        'total': pendingCount + activeCount + returnedCount,
+        'pending': pending.count ?? 0,
+        'active': active.count ?? 0,
+        'overdue': overdue.length,
+        'total': (pending.count ?? 0) + (active.count ?? 0),
       };
     } catch (e) {
-      print('Error getting borrow stats: $e');
+      print('Error getting borrow statistics: $e');
       return {
         'pending': 0,
         'active': 0,
-        'returned': 0,
+        'overdue': 0,
         'total': 0,
       };
-    }
-  }
-
-  // Calculate late fees if applicable
-  double calculateLateFees(DateTime expectedReturnDate, double borrowValue) {
-    final now = DateTime.now();
-    if (now.isAfter(expectedReturnDate)) {
-      final daysLate = now.difference(expectedReturnDate).inDays;
-      // 5% of borrow value per day late, max 50%
-      final feePercentage = (daysLate * 0.05).clamp(0, 0.5);
-      return borrowValue * feePercentage;
-    }
-    return 0;
-  }
-
-  // Get overdue borrows (for admin notifications)
-  Future<List<Map<String, dynamic>>> getOverdueBorrows() async {
-    try {
-      final now = DateTime.now();
-      final query = await _firestore
-          .collection('borrow_requests')
-          .where('status', isEqualTo: 'approved')
-          .get();
-
-      List<Map<String, dynamic>> overdueBorrows = [];
-
-      for (var doc in query.docs) {
-        final data = doc.data();
-        if (data['expectedReturnDate'] != null) {
-          final expectedReturn = (data['expectedReturnDate'] as Timestamp).toDate();
-          if (now.isAfter(expectedReturn)) {
-            data['id'] = doc.id;
-            data['daysOverdue'] = now.difference(expectedReturn).inDays;
-            overdueBorrows.add(data);
-          }
-        }
-      }
-
-      return overdueBorrows;
-    } catch (e) {
-      print('Error getting overdue borrows: $e');
-      return [];
     }
   }
 }

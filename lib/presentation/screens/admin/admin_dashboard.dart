@@ -119,7 +119,7 @@ class AdminDashboard extends StatelessWidget {
               shrinkWrap: true,
               physics: NeverScrollableScrollPhysics(),
               crossAxisCount: 2,
-              childAspectRatio: 1.5,
+              childAspectRatio: 1.3,
               crossAxisSpacing: 12.w,
               mainAxisSpacing: 12.h,
               children: [

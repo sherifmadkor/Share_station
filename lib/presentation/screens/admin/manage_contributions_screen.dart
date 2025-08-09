@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
+// Make sure this import path is correct
 import '../../../services/contribution_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../providers/app_provider.dart';
@@ -22,12 +23,14 @@ class ManageContributionsScreen extends StatefulWidget {
 class _ManageContributionsScreenState extends State<ManageContributionsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final ContributionService _contributionService = ContributionService();
+  late final ContributionService _contributionService;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // Initialize the service in initState
+    _contributionService = ContributionService();
   }
 
   @override
@@ -149,22 +152,15 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
   }
 
   Widget _buildRejectedTab() {
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
-    final isArabic = appProvider.isArabic;
-
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('contribution_requests')
-          .where('status', isEqualTo: 'rejected')
-          .orderBy('rejectedAt', descending: true)
-          .snapshots(),
+      stream: _contributionService.getRejectedContributions(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(child: CustomLoading());
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return _buildEmptyState(isArabic ? 'لا توجد مساهمات مرفوضة' : 'No rejected contributions');
+          return _buildEmptyState('No rejected contributions');
         }
 
         return ListView.builder(
@@ -466,24 +462,26 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
         ? await _contributionService.approveGameContribution(docId)
         : await _contributionService.approveFundContribution(docId);
 
-    Navigator.pop(context); // Close loading dialog
+    if (mounted) {
+      Navigator.pop(context); // Close loading dialog
 
-    if (result['success']) {
-      Fluttertoast.showToast(
-        msg: isArabic ? 'تمت الموافقة على المساهمة بنجاح!' : result['message'],
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: AppTheme.successColor,
-        textColor: Colors.white,
-      );
-    } else {
-      Fluttertoast.showToast(
-        msg: result['message'] ?? 'Failed to approve contribution',
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: AppTheme.errorColor,
-        textColor: Colors.white,
-      );
+      if (result['success']) {
+        Fluttertoast.showToast(
+          msg: isArabic ? 'تمت الموافقة على المساهمة بنجاح!' : result['message'],
+          toastLength: Toast.LENGTH_LONG,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: AppTheme.successColor,
+          textColor: Colors.white,
+        );
+      } else {
+        Fluttertoast.showToast(
+          msg: result['message'] ?? 'Failed to approve contribution',
+          toastLength: Toast.LENGTH_LONG,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: AppTheme.errorColor,
+          textColor: Colors.white,
+        );
+      }
     }
   }
 
@@ -494,7 +492,7 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(isArabic ? 'رفض المساهمة' : 'Reject Contribution'),
         content: TextField(
           controller: reasonController,
@@ -509,7 +507,7 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text(isArabic ? 'إلغاء' : 'Cancel'),
           ),
           ElevatedButton(
@@ -524,11 +522,11 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
                 return;
               }
 
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
 
               // Show loading
               showDialog(
-                context: this.context,
+                context: context,
                 barrierDismissible: false,
                 builder: (context) => Center(child: CustomLoading()),
               );
@@ -538,20 +536,22 @@ class _ManageContributionsScreenState extends State<ManageContributionsScreen>
                 reasonController.text.trim(),
               );
 
-              Navigator.pop(this.context); // Close loading
+              if (mounted) {
+                Navigator.pop(context); // Close loading
 
-              if (result['success']) {
-                Fluttertoast.showToast(
-                  msg: isArabic ? 'تم رفض المساهمة' : result['message'],
-                  backgroundColor: AppTheme.warningColor,
-                  textColor: Colors.white,
-                );
-              } else {
-                Fluttertoast.showToast(
-                  msg: result['message'] ?? 'Failed to reject contribution',
-                  backgroundColor: AppTheme.errorColor,
-                  textColor: Colors.white,
-                );
+                if (result['success']) {
+                  Fluttertoast.showToast(
+                    msg: isArabic ? 'تم رفض المساهمة' : result['message'],
+                    backgroundColor: AppTheme.warningColor,
+                    textColor: Colors.white,
+                  );
+                } else {
+                  Fluttertoast.showToast(
+                    msg: result['message'] ?? 'Failed to reject contribution',
+                    backgroundColor: AppTheme.errorColor,
+                    textColor: Colors.white,
+                  );
+                }
               }
             },
             style: ElevatedButton.styleFrom(
