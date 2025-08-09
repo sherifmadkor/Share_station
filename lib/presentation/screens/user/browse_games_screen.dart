@@ -15,6 +15,7 @@ import '../../../data/models/game_model.dart' as game_models;
 import '../../../data/models/user_model.dart' hide Platform;
 import '../../widgets/custom_loading.dart';
 import '../../widgets/game/game_details_modal.dart';
+import 'borrow_game_screen.dart';
 
 class BrowseGamesScreen extends StatefulWidget {
   const BrowseGamesScreen({Key? key}) : super(key: key);
@@ -944,12 +945,268 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => GameDetailsModal(game: game),
+      builder: (context) => _buildGameDetailsModal(game),
     ).then((result) {
       if (result == true) {
         // Refresh the games list if a borrow was made
         _loadGames();
       }
     });
+  }
+
+  Widget _buildGameDetailsModal(game_models.GameAccount game) {
+    final appProvider = Provider.of<AppProvider>(context);
+    final authProvider = Provider.of<AuthProvider>(context);
+    final isArabic = appProvider.isArabic;
+    final isDarkMode = appProvider.isDarkMode;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                margin: EdgeInsets.only(top: 12.h),
+                width: 50.w,
+                height: 5.h,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(10.r),
+                ),
+              ),
+              // Content
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: EdgeInsets.all(20.w),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Game Title
+                      Text(
+                        game.title,
+                        style: TextStyle(
+                          fontSize: 24.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+
+                      // Game Info
+                      Row(
+                        children: [
+                          // Value
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8.r),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.attach_money, size: 16.sp, color: AppTheme.primaryColor),
+                                Text(
+                                  '${game.gameValue.toStringAsFixed(0)} LE',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primaryColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(width: 8.w),
+                          // Lender Tier
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                            decoration: BoxDecoration(
+                              color: _getCategoryColor(game.lenderTier).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8.r),
+                            ),
+                            child: Text(
+                              _getCategoryLabel(game.lenderTier, isArabic),
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                fontWeight: FontWeight.bold,
+                                color: _getCategoryColor(game.lenderTier),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      SizedBox(height: 16.h),
+
+                      // Available Slots
+                      Text(
+                        isArabic ? 'النسخ المتاحة' : 'Available Slots',
+                        style: TextStyle(
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 12.h),
+
+                      // Slots Grid
+                      _buildSlotsGrid(game),
+
+                      SizedBox(height: 24.h),
+
+                      // Borrow Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56.h,
+                        child: ElevatedButton.icon(
+                          onPressed: _getAvailableSlots(game) > 0
+                              ? () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => BorrowGameScreen(game: game),
+                              ),
+                            ).then((result) {
+                              if (result == true) {
+                                _loadGames();
+                              }
+                            });
+                          }
+                              : null,
+                          icon: Icon(FontAwesomeIcons.gamepad, color: Colors.white),
+                          label: Text(
+                            _getAvailableSlots(game) > 0
+                                ? (isArabic ? 'طلب استعارة' : 'Request Borrow')
+                                : (isArabic ? 'غير متاح' : 'Not Available'),
+                            style: TextStyle(
+                              fontSize: 18.sp,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryColor,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12.r),
+                            ),
+                            disabledBackgroundColor: Colors.grey,
+                          ),
+                        ),
+                      ),
+
+                      // Contributor Info
+                      if (game.contributorName.isNotEmpty) ...[
+                        SizedBox(height: 16.h),
+                        Divider(),
+                        SizedBox(height: 16.h),
+                        Row(
+                          children: [
+                            Icon(Icons.person_outline, size: 20.sp, color: Colors.grey),
+                            SizedBox(width: 8.w),
+                            Text(
+                              '${isArabic ? "المساهم:" : "Contributor:"} ${game.contributorName}',
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSlotsGrid(game_models.GameAccount game) {
+    final List<Widget> slotWidgets = [];
+
+    if (game.accounts != null && game.accounts!.isNotEmpty) {
+      // New structure with multiple accounts
+      for (var account in game.accounts!) {
+        final slots = account['slots'] as Map<String, dynamic>?;
+        if (slots != null) {
+          slots.forEach((key, slotData) {
+            slotWidgets.add(_buildSlotChip(
+              platform: slotData['platform'],
+              accountType: slotData['accountType'],
+              status: slotData['status'],
+            ));
+          });
+        }
+      }
+    } else {
+      // Old structure
+      game.slots.forEach((key, slot) {
+        slotWidgets.add(_buildSlotChip(
+          platform: slot.platform.value,
+          accountType: slot.accountType.value,
+          status: slot.status.value,
+        ));
+      });
+    }
+
+    return Wrap(
+      spacing: 8.w,
+      runSpacing: 8.h,
+      children: slotWidgets,
+    );
+  }
+
+  Widget _buildSlotChip({
+    required String platform,
+    required String accountType,
+    required String status,
+  }) {
+    final isAvailable = status == 'available';
+    final color = isAvailable ? AppTheme.successColor : AppTheme.errorColor;
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8.r),
+        border: Border.all(color: color),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            FontAwesomeIcons.playstation,
+            size: 14.sp,
+            color: color,
+          ),
+          SizedBox(width: 6.w),
+          Text(
+            '${platform.toUpperCase()} - ${accountType}',
+            style: TextStyle(
+              fontSize: 12.sp,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          SizedBox(width: 6.w),
+          Icon(
+            isAvailable ? Icons.check_circle : Icons.cancel,
+            size: 14.sp,
+            color: color,
+          ),
+        ],
+      ),
+    );
   }
 }

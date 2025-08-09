@@ -31,6 +31,9 @@ class BorrowService {
 
       final userData = userDoc.data()!;
 
+      // Get user's member ID (3-digit)
+      final memberId = userData['memberId'] ?? userData['uid'] ?? userId;
+
       // Calculate actual borrow value based on account type
       final actualBorrowValue = borrowValue * accountType.borrowMultiplier;
 
@@ -77,11 +80,10 @@ class BorrowService {
       }
 
       // Create borrow request
-      final requestId = _uuid.v4();
       final requestData = {
-        'requestId': requestId,
         'userId': userId,
         'userName': userName,
+        'memberId': memberId, // Add member ID for display
         'gameId': gameId,
         'gameTitle': gameTitle,
         'accountId': accountId,
@@ -93,12 +95,12 @@ class BorrowService {
         'requestDate': FieldValue.serverTimestamp(),
       };
 
-      await _firestore.collection('borrow_requests').add(requestData);
+      final docRef = await _firestore.collection('borrow_requests').add(requestData);
 
       return {
         'success': true,
         'message': 'Borrow request submitted successfully! Waiting for admin approval.',
-        'requestId': requestId,
+        'requestId': docRef.id,
       };
     } catch (e) {
       print('Error submitting borrow request: $e');
@@ -197,7 +199,7 @@ class BorrowService {
     try {
       final batch = _firestore.batch();
 
-      // Get the borrow request
+      // Get the borrow request by document ID
       final requestDoc = await _firestore
           .collection('borrow_requests')
           .doc(requestId)
@@ -341,6 +343,7 @@ class BorrowService {
       String reason,
       ) async {
     try {
+      // Update by document ID directly
       await _firestore.collection('borrow_requests').doc(requestId).update({
         'status': 'rejected',
         'rejectedAt': FieldValue.serverTimestamp(),

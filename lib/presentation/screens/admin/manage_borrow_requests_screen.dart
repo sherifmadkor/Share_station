@@ -116,7 +116,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            return _buildBorrowCard(data, 'pending');
+            return _buildBorrowCard(doc.id, data, 'pending');
           },
         );
       },
@@ -141,7 +141,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            return _buildBorrowCard(data, 'active');
+            return _buildBorrowCard(doc.id, data, 'active');
           },
         );
       },
@@ -149,15 +149,13 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
   }
 
   Widget _buildHistoryTab() {
-    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    final appProvider = Provider.of<AppProvider>(context);
     final isArabic = appProvider.isArabic;
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('borrow_requests')
           .where('status', whereIn: ['returned', 'rejected'])
-          .orderBy('requestDate', descending: true)
-          .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -174,14 +172,14 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>;
-            return _buildBorrowCard(data, 'history');
+            return _buildBorrowCard(doc.id, data, data['status'] ?? 'history');
           },
         );
       },
     );
   }
 
-  Widget _buildBorrowCard(Map<String, dynamic> data, String status) {
+  Widget _buildBorrowCard(String docId, Map<String, dynamic> data, String status) {
     final appProvider = Provider.of<AppProvider>(context);
     final isArabic = appProvider.isArabic;
     final isDarkMode = appProvider.isDarkMode;
@@ -190,19 +188,8 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
         ? (data['requestDate'] as Timestamp).toDate()
         : DateTime.now();
 
-    Color statusColor = AppTheme.warningColor;
-    String statusText = isArabic ? 'معلق' : 'Pending';
-
-    if (status == 'active' || data['status'] == 'approved') {
-      statusColor = AppTheme.successColor;
-      statusText = isArabic ? 'نشط' : 'Active';
-    } else if (data['status'] == 'returned') {
-      statusColor = AppTheme.infoColor;
-      statusText = isArabic ? 'مُرجع' : 'Returned';
-    } else if (data['status'] == 'rejected') {
-      statusColor = AppTheme.errorColor;
-      statusText = isArabic ? 'مرفوض' : 'Rejected';
-    }
+    // Get member ID or user ID for display
+    final displayId = data['memberId'] ?? data['userId'] ?? 'Unknown';
 
     return Container(
       margin: EdgeInsets.only(bottom: 12.h),
@@ -221,12 +208,12 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
         leading: Container(
           padding: EdgeInsets.all(8.w),
           decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.1),
+            color: _getStatusColor(status).withOpacity(0.1),
             borderRadius: BorderRadius.circular(8.r),
           ),
           child: Icon(
             FontAwesomeIcons.gamepad,
-            color: statusColor,
+            color: _getStatusColor(status),
             size: 20.sp,
           ),
         ),
@@ -247,7 +234,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
             Row(
               children: [
                 Text(
-                  '${isArabic ? "القيمة:" : "Value:"} ${data['borrowValue']} LE',
+                  '${isArabic ? "القيمة:" : "Value:"} ${data['borrowValue'] ?? data['gameValue'] ?? 0} LE',
                   style: TextStyle(
                     fontSize: 14.sp,
                     color: AppTheme.primaryColor,
@@ -258,14 +245,14 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
                   decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
+                    color: _getStatusColor(status).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(4.r),
                   ),
                   child: Text(
-                    statusText,
+                    _getStatusLabel(status, isArabic),
                     style: TextStyle(
                       fontSize: 12.sp,
-                      color: statusColor,
+                      color: _getStatusColor(status),
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -289,7 +276,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
               children: [
                 _buildDetailRow(
                   isArabic ? 'المنصة' : 'Platform',
-                  data['platform']?.toUpperCase() ?? 'N/A',
+                  data['platform']?.toString().toUpperCase() ?? 'N/A',
                 ),
                 _buildDetailRow(
                   isArabic ? 'نوع الحساب' : 'Account Type',
@@ -297,30 +284,14 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
                 ),
                 _buildDetailRow(
                   isArabic ? 'معرف المستخدم' : 'User ID',
-                  data['userId'] ?? 'N/A',
+                  displayId,
                 ),
-
-                if (data['status'] == 'approved' && data['approvalDate'] != null) ...[
+                if (data['memberId'] != null)
                   _buildDetailRow(
-                    isArabic ? 'تاريخ الموافقة' : 'Approval Date',
-                    _formatDate((data['approvalDate'] as Timestamp).toDate()),
+                    isArabic ? 'رقم العضوية' : 'Member ID',
+                    data['memberId'],
                   ),
-                ],
-
-                if (data['status'] == 'returned' && data['returnDate'] != null) ...[
-                  _buildDetailRow(
-                    isArabic ? 'تاريخ الإرجاع' : 'Return Date',
-                    _formatDate((data['returnDate'] as Timestamp).toDate()),
-                  ),
-                  if (data['holdPeriod'] != null) ...[
-                    _buildDetailRow(
-                      isArabic ? 'فترة الاحتفاظ' : 'Hold Period',
-                      '${data['holdPeriod']} ${isArabic ? "يوم" : "days"}',
-                    ),
-                  ],
-                ],
-
-                if (data['status'] == 'rejected' && data['rejectionReason'] != null) ...[
+                if (status == 'rejected' && data['rejectionReason'] != null) ...[
                   SizedBox(height: 8.h),
                   Container(
                     padding: EdgeInsets.all(12.w),
@@ -349,15 +320,13 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
                     ),
                   ),
                 ],
-
-                // Action buttons
                 if (status == 'pending') ...[
                   SizedBox(height: 16.h),
                   Row(
                     children: [
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: () => _approveBorrowRequest(data['requestId']),
+                          onPressed: () => _approveBorrowRequest(docId),
                           icon: Icon(FontAwesomeIcons.check, size: 16.sp),
                           label: Text(isArabic ? 'موافقة' : 'Approve'),
                           style: ElevatedButton.styleFrom(
@@ -372,7 +341,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
                       SizedBox(width: 12.w),
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: () => _showRejectDialog(data['requestId']),
+                          onPressed: () => _showRejectDialog(docId),
                           icon: Icon(FontAwesomeIcons.times, size: 16.sp),
                           label: Text(isArabic ? 'رفض' : 'Reject'),
                           style: ElevatedButton.styleFrom(
@@ -386,13 +355,14 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
                       ),
                     ],
                   ),
-                ] else if (status == 'active' || data['status'] == 'approved') ...[
+                ],
+                if (status == 'active') ...[
                   SizedBox(height: 16.h),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: () => _returnGame(data['requestId']),
-                      icon: Icon(FontAwesomeIcons.undoAlt, size: 16.sp),
+                      onPressed: () => _returnGame(docId),
+                      icon: Icon(FontAwesomeIcons.undo, size: 16.sp),
                       label: Text(isArabic ? 'تسجيل الإرجاع' : 'Mark as Returned'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.infoColor,
@@ -466,6 +436,38 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
     );
   }
 
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'pending':
+        return AppTheme.warningColor;
+      case 'active':
+      case 'approved':
+        return AppTheme.successColor;
+      case 'rejected':
+        return AppTheme.errorColor;
+      case 'returned':
+        return AppTheme.infoColor;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getStatusLabel(String status, bool isArabic) {
+    switch (status) {
+      case 'pending':
+        return isArabic ? 'معلق' : 'Pending';
+      case 'active':
+      case 'approved':
+        return isArabic ? 'نشط' : 'Active';
+      case 'rejected':
+        return isArabic ? 'مرفوض' : 'Rejected';
+      case 'returned':
+        return isArabic ? 'مُرجع' : 'Returned';
+      default:
+        return status;
+    }
+  }
+
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
@@ -482,7 +484,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
     }
   }
 
-  Future<void> _approveBorrowRequest(String requestId) async {
+  Future<void> _approveBorrowRequest(String docId) async {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final isArabic = appProvider.isArabic;
 
@@ -521,7 +523,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
       builder: (context) => Center(child: CustomLoading()),
     );
 
-    final result = await _borrowService.approveBorrowRequest(requestId);
+    final result = await _borrowService.approveBorrowRequest(docId);
 
     Navigator.pop(context); // Close loading
 
@@ -544,7 +546,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
     }
   }
 
-  Future<void> _returnGame(String requestId) async {
+  Future<void> _returnGame(String docId) async {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final isArabic = appProvider.isArabic;
 
@@ -583,7 +585,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
       builder: (context) => Center(child: CustomLoading()),
     );
 
-    final result = await _borrowService.returnBorrowedGame(requestId);
+    final result = await _borrowService.returnBorrowedGame(docId);
 
     Navigator.pop(context); // Close loading
 
@@ -606,7 +608,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
     }
   }
 
-  Future<void> _showRejectDialog(String requestId) async {
+  Future<void> _showRejectDialog(String docId) async {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final isArabic = appProvider.isArabic;
     final TextEditingController reasonController = TextEditingController();
@@ -653,7 +655,7 @@ class _ManageBorrowRequestsScreenState extends State<ManageBorrowRequestsScreen>
               );
 
               final result = await _borrowService.rejectBorrowRequest(
-                requestId,
+                docId,
                 reasonController.text.trim(),
               );
 

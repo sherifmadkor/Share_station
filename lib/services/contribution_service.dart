@@ -355,6 +355,7 @@ class ContributionService {
       // Update user document
       Map<String, dynamic> userUpdates = {
         'stationLimit': FieldValue.increment(gameValue),
+        // Don't set remainingStationLimit here - let it be calculated when needed
         'gameShares': newGameShares,
         'totalShares': newTotalShares,
         'borrowLimit': newBorrowLimit,
@@ -362,6 +363,14 @@ class ContributionService {
         'lastActivityDate': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
+
+      // Initialize remainingStationLimit if it doesn't exist
+      if (userData['remainingStationLimit'] == null) {
+        userUpdates['remainingStationLimit'] = userData['stationLimit'] ?? 0 + gameValue;
+      } else {
+        // Just increment it like stationLimit
+        userUpdates['remainingStationLimit'] = FieldValue.increment(gameValue);
+      }
 
       if (shouldPromoteToVIP) {
         userUpdates['tier'] = 'vip';
