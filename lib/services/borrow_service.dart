@@ -499,14 +499,18 @@ class BorrowService {
         activityDescription: 'Game borrowing: ${data['gameTitle']}',
       );
 
+      // Get user data for metrics processing
+      final borrowerDoc = await _firestore.collection('users').doc(data['userId']).get();
+      final borrowerData = borrowerDoc.exists ? borrowerDoc.data()! : {};
+
       // Process metrics
       await _metricsService.processBorrowMetrics(
         borrowerId: data['userId'],
         lenderId: contributorId,
-        borrowerTier: userData['tier'] ?? 'member',
+        borrowerTier: borrowerData['tier'] ?? 'member',
         lenderTier: 'member', // Assuming member-contributed games
         borrowValue: actualBorrowValue,
-        freeborrowingsRemaining: userData['freeborrowings'] ?? 0,
+        freeborrowingsRemaining: borrowerData['freeborrowings'] ?? 0,
       );
 
       return {
