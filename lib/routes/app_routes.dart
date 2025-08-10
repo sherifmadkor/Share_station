@@ -15,6 +15,11 @@ class AppRoutes {
   static const String userProfile = '/user-profile';
   static const String borrowHistory = '/borrow-history';
   static const String referrals = '/referrals';
+  static const String pointsRedemption = '/points-redemption';
+  static const String balanceDetails = '/balance-details';
+  static const String sellGame = '/sell-game';
+  static const String queueManagement = '/queue-management';
+  static const String addContribution = '/add-contribution';
 
   // Admin Routes
   static const String adminDashboard = '/admin-dashboard';
@@ -77,5 +82,10 @@ class AppRoutes {
     userProfile,
     borrowHistory,
     referrals,
+    pointsRedemption,
+    balanceDetails,
+    sellGame,
+    queueManagement,
+    addContribution,
   ];
 }

@@ -437,4 +437,80 @@ class QueueService {
       };
     }
   }
+
+  // Get user's queue entries (for queue management screen)
+  Future<List<Map<String, dynamic>>> getUserQueueEntries(String userId) async {
+    try {
+      final query = await _firestore
+          .collection('game_queues')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'active')
+          .orderBy('joinedAt', descending: true)
+          .get();
+
+      return query.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id; // Add document ID
+        return data;
+      }).toList();
+    } catch (e) {
+      print('Error getting user queue entries: $e');
+      return [];
+    }
+  }
+
+  // Get all queue entries (for admin monitoring)
+  Future<List<Map<String, dynamic>>> getAllQueueEntries() async {
+    try {
+      final query = await _firestore
+          .collection('game_queues')
+          .where('status', isEqualTo: 'active')
+          .orderBy('contributionScore', descending: true)
+          .orderBy('joinedAt', descending: false)
+          .limit(50) // Limit for performance
+          .get();
+
+      return query.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id; // Add document ID
+        // Add priority field for UI display
+        data['priority'] = data['contributionScore'] ?? 0.0;
+        return data;
+      }).toList();
+    } catch (e) {
+      print('Error getting all queue entries: $e');
+      return [];
+    }
+  }
+
+  // Remove from queue by queue ID
+  Future<void> removeFromQueue(String queueId) async {
+    try {
+      final docRef = _firestore.collection('game_queues').doc(queueId);
+      final docSnapshot = await docRef.get();
+      
+      if (!docSnapshot.exists) {
+        throw Exception('Queue entry not found');
+      }
+
+      final queueData = docSnapshot.data()!;
+      
+      // Update status to cancelled
+      await docRef.update({
+        'status': 'cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update positions for remaining queue entries
+      await _updateQueuePositions(
+        queueData['gameId'],
+        queueData['accountId'],
+        queueData['platform'],
+        queueData['accountType'],
+      );
+    } catch (e) {
+      print('Error removing from queue: $e');
+      throw Exception('Failed to remove from queue: $e');
+    }
+  }
 }

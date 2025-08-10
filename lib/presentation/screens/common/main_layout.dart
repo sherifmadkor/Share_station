@@ -29,7 +29,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   // User screens
   final List<Widget> _userScreens = [
-    const UserDashboard(),
+    const EnhancedUserDashboard(),
     const BrowseGamesScreen(),
     const MyBorrowingsScreen(),
     const EnhancedProfileScreen(),

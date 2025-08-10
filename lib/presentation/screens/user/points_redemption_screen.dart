@@ -355,7 +355,7 @@ class _PointsRedemptionScreenState extends State<PointsRedemptionScreen> {
                     crossAxisCount: 2,
                     crossAxisSpacing: 12.w,
                     mainAxisSpacing: 12.h,
-                    childAspectRatio: 1.2,
+                    childAspectRatio: 1.0,
                   ),
                   itemCount: redemptionOptions.length,
                   itemBuilder: (context, index) {

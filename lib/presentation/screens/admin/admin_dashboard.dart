@@ -14,6 +14,8 @@ import '../admin/manage_contributions_screen.dart';
 import '../admin/manage_borrow_requests_screen.dart';
 import '../admin/manage_users_screen.dart';
 import '../admin/manage_games_screen.dart';
+import '../admin/analytics_screen.dart';
+import '../admin/settings_screen.dart';
 import '../../../services/suspension_service.dart';
 import '../../../services/balance_service.dart';
 
@@ -241,19 +243,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
     try {
       // Run balance expiry checks first
       final balanceResult = await _balanceService.checkAndExpireBalances();
-      
+
       // Run suspension checks
       final suspensionResult = await _suspensionService.checkAndApplySuspensions();
-      
+
       // Run VIP promotion checks
       final vipResult = await _suspensionService.batchCheckVIPPromotions();
-      
+
       // Show notifications if there are changes
       if (mounted) {
         // Balance expiry notifications
         if (balanceResult['expired'] > 0) {
           print('Balance expiry check completed: ${balanceResult['expired']} entries expired for ${balanceResult['usersAffected']} users. Total: ${balanceResult['totalExpired']} LE');
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -264,10 +266,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
           );
         }
-        
+
         if (suspensionResult['suspended'] > 0) {
           print('Suspension check completed: ${suspensionResult['suspended']} users suspended out of ${suspensionResult['checked']} checked');
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -278,10 +280,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
           );
         }
-        
+
         if (vipResult['promoted'] > 0) {
           print('VIP promotion check completed: ${vipResult['promoted']} users promoted out of ${vipResult['checked']} checked');
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -292,7 +294,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
           );
         }
-        
+
         // Refresh statistics if there were any changes
         if (balanceResult['expired'] > 0 || suspensionResult['suspended'] > 0 || vipResult['promoted'] > 0) {
           _loadStatistics();
@@ -499,7 +501,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
               SizedBox(height: 24.h),
 
-              // Quick Actions
+              // Quick Actions Grid
               Text(
                 isArabic ? 'الإجراءات السريعة' : 'Quick Actions',
                 style: TextStyle(
@@ -509,75 +511,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               SizedBox(height: 12.h),
 
-              Column(
-                children: [
-                  _buildActionTile(
-                    title: isArabic ? 'إدارة المساهمات' : 'Manage Contributions',
-                    subtitle: _pendingContributions > 0
-                        ? '$_pendingContributions ${isArabic ? "بانتظار الموافقة" : "pending approval"}'
-                        : (isArabic ? 'مراجعة وإدارة المساهمات' : 'Review and manage contributions'),
-                    icon: FontAwesomeIcons.folderOpen,
-                    color: AppTheme.warningColor,
-                    hasNotification: _pendingContributions > 0,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ManageContributionsScreen(),
-                        ),
-                      ).then((_) => _loadStatistics());
-                    },
-                  ),
-                  SizedBox(height: 12.h),
-                  _buildActionTile(
-                    title: isArabic ? 'إدارة الاستعارات' : 'Manage Borrow Requests',
-                    subtitle: _pendingBorrows > 0
-                        ? '$_pendingBorrows ${isArabic ? "طلب معلق" : "pending requests"}'
-                        : (isArabic ? 'مراجعة طلبات الاستعارة' : 'Review borrow requests'),
-                    icon: FontAwesomeIcons.handHolding,
-                    color: AppTheme.infoColor,
-                    hasNotification: _pendingBorrows > 0,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ManageBorrowRequestsScreen(),
-                        ),
-                      ).then((_) => _loadStatistics());
-                    },
-                  ),
-                  SizedBox(height: 12.h),
-                  _buildActionTile(
-                    title: isArabic ? 'إدارة المستخدمين' : 'Manage Users',
-                    subtitle: isArabic ? 'عرض وإدارة حسابات المستخدمين' : 'View and manage user accounts',
-                    icon: FontAwesomeIcons.usersCog,
-                    color: AppTheme.primaryColor,
-                    onTap: () {
-                      // Navigate to manage users screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(isArabic ? 'قريباً' : 'Coming soon'),
-                        ),
-                      );
-                    },
-                  ),
-                  SizedBox(height: 12.h),
-                  _buildActionTile(
-                    title: isArabic ? 'إدارة الألعاب' : 'Manage Games',
-                    subtitle: isArabic ? 'إدارة مكتبة الألعاب والحسابات' : 'Manage game library and accounts',
-                    icon: FontAwesomeIcons.gamepad,
-                    color: AppTheme.successColor,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ManageGamesScreen(),
-                        ),
-                      ).then((_) => _loadStatistics());
-                    },
-                  ),
-                ],
+              _buildAdminQuickActions(),
+
+              SizedBox(height: 24.h),
+
+              // System Maintenance Buttons
+              Text(
+                isArabic ? 'صيانة النظام' : 'System Maintenance',
+                style: TextStyle(
+                  fontSize: 18.sp,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
+              SizedBox(height: 12.h),
+
+              _buildAdminQuickButtons(),
             ],
           ),
         ),
@@ -763,6 +711,410 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ],
         ),
       ),
+    );
+  }
+
+  // Admin Quick Actions Grid
+  Widget _buildAdminQuickActions() {
+    final appProvider = Provider.of<AppProvider>(context);
+    final isArabic = appProvider.isArabic;
+
+    return GridView.count(
+      shrinkWrap: true,
+      physics: NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      crossAxisSpacing: 12.w,
+      mainAxisSpacing: 12.h,
+      childAspectRatio: 1.3, // Adjusted for 6 items (3 rows)
+      children: [
+        _buildAdminActionCard(
+          title: isArabic ? 'لوحة الموافقات' : 'Approvals',
+          subtitle: '${_pendingContributions + _pendingBorrows} pending',
+          icon: FontAwesomeIcons.clipboardCheck,
+          color: AppTheme.warningColor,
+          badge: (_pendingContributions + _pendingBorrows).toString(),
+          onTap: () {
+            // Navigate to contributions if more pending contributions, otherwise borrows
+            if (_pendingContributions >= _pendingBorrows) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ManageContributionsScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ManageBorrowRequestsScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            }
+          },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'إدارة الألعاب' : 'Manage Games',
+          subtitle: '$_totalGames games',
+          icon: FontAwesomeIcons.gamepad,
+          color: AppTheme.successColor,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ManageGamesScreen(),
+              ),
+            ).then((_) => _loadStatistics());
+          },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'إدارة المستخدمين' : 'Manage Users',
+          subtitle: '$_totalMembers members',
+          icon: FontAwesomeIcons.usersCog,
+          color: AppTheme.primaryColor,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ManageUsersScreen(),
+              ),
+            ).then((_) => _loadStatistics());
+          },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'التحليلات' : 'Analytics',
+          subtitle: isArabic ? 'عرض الإحصائيات' : 'View statistics',
+          icon: Icons.analytics,
+          color: AppTheme.infoColor,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const AnalyticsScreen(),
+              ),
+            ).then((_) => _loadStatistics());
+          },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'الإعدادات' : 'Settings',
+          subtitle: isArabic ? 'إعدادات النظام' : 'System settings',
+          icon: Icons.settings,
+          color: Colors.grey,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const SettingsScreen(),
+              ),
+            ).then((_) => _loadStatistics());
+          },
+        ),
+      ],
+    );
+  }
+
+  // Admin Action Card Widget
+  Widget _buildAdminActionCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    String? badge,
+  }) {
+    final isDarkMode = Provider.of<AppProvider>(context).isDarkMode;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16.r),
+      child: Container(
+        padding: EdgeInsets.all(16.w),
+        decoration: BoxDecoration(
+          color: isDarkMode ? AppTheme.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(16.r),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(12.w),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: color,
+                    size: 24.sp,
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4.h),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        color: isDarkMode ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (badge != null && badge != "0")
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor,
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // System Maintenance Quick Buttons
+  Widget _buildAdminQuickButtons() {
+    final appProvider = Provider.of<AppProvider>(context);
+    final isArabic = appProvider.isArabic;
+
+    return Wrap(
+      spacing: 8.w,
+      runSpacing: 8.h,
+      children: [
+        ElevatedButton.icon(
+          onPressed: () async {
+            // Run suspension check
+            try {
+              final result = await _suspensionService.checkAndApplySuspensions();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Checked ${result['checked']} users, suspended ${result['suspended']}',
+                    ),
+                    backgroundColor: AppTheme.warningColor,
+                  ),
+                );
+                if (result['suspended'] > 0) {
+                  _loadStatistics();
+                }
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: AppTheme.errorColor,
+                  ),
+                );
+              }
+            }
+          },
+          icon: Icon(Icons.person_off, size: 16.sp),
+          label: Text(
+            isArabic ? 'فحص التعليق' : 'Check Suspensions',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.warningColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+
+        ElevatedButton.icon(
+          onPressed: () async {
+            // Check balance expiry
+            try {
+              final result = await _balanceService.checkAndExpireBalances();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Expired ${result['expired']} balance entries',
+                    ),
+                    backgroundColor: AppTheme.errorColor,
+                  ),
+                );
+                if (result['expired'] > 0) {
+                  _loadStatistics();
+                }
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: AppTheme.errorColor,
+                  ),
+                );
+              }
+            }
+          },
+          icon: Icon(Icons.timer_off, size: 16.sp),
+          label: Text(
+            isArabic ? 'فحص انتهاء الرصيد' : 'Check Expiry',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.errorColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+
+        ElevatedButton.icon(
+          onPressed: () {
+            _navigateToPointsManagement();
+          },
+          icon: Icon(FontAwesomeIcons.coins, size: 16.sp),
+          label: Text(
+            isArabic ? 'إدارة النقاط' : 'Points Management',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.secondaryColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+
+        ElevatedButton.icon(
+          onPressed: () {
+            _navigateToQueueMonitoring();
+          },
+          icon: Icon(Icons.queue, size: 16.sp),
+          label: Text(
+            isArabic ? 'مراقبة القوائم' : 'Queue Monitor',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.infoColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+        
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/analytics'),
+          icon: Icon(Icons.analytics, size: 16.sp),
+          label: Text(
+            isArabic ? 'التحليلات' : 'Analytics',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/admin-settings'),
+          icon: Icon(Icons.settings, size: 16.sp),
+          label: Text(
+            isArabic ? 'الإعدادات' : 'Settings',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.secondaryColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Initialize system settings (one-time setup)
+  Future<void> _initializeSystemSettings() async {
+    try {
+      await _firestore.collection('settings').doc('system').set({
+        'membershipFee': 1500,
+        'clientFee': 750,
+        'vipWithdrawalFeePercentage': 20,
+        'adminFeePercentage': 10,
+        'pointsConversionRate': 25,
+        'balanceExpiryDays': 90,
+        'suspensionPeriodDays': 180,
+        'borrowWindowDay': 'thursday',
+        'isBorrowWindowOpen': true,
+        'allowNewRegistrations': true,
+        'maintenanceMode': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('System settings initialized successfully'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error initializing settings: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  // Navigation methods
+  void _navigateToReports() {
+    _initializeSystemSettings(); // Initialize settings when accessing reports
+  }
+
+  void _navigateToPointsManagement() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Points Management - Coming Soon')),
+    );
+  }
+
+  void _navigateToQueueMonitoring() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Queue Monitoring - Coming Soon')),
     );
   }
 }

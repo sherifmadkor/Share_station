@@ -2,10 +2,12 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'balance_service.dart';
+import 'analytics_service.dart';
 
 class SellingService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final BalanceService _balanceService = BalanceService();
+  final AnalyticsService _analyticsService = AnalyticsService();
   
   // Initiate game sale
   Future<Map<String, dynamic>> sellContributedGame({
@@ -115,6 +117,29 @@ class SellingService {
         amount: sellValue,
         description: 'Sale of ${gameData['title']} ($accountType account)',
         expires: true,
+      );
+
+      // Track admin fee revenue
+      await _analyticsService.trackAdminFee(
+        adminFee: adminFee,
+        source: 'game_sale',
+        sellerId: userId,
+        gameId: gameId,
+        gameTitle: gameData['title'],
+      );
+
+      // Track user activity
+      await _analyticsService.trackUserActivity(
+        userId: userId,
+        activityType: 'sell_game',
+        metadata: {
+          'gameId': gameId,
+          'gameTitle': gameData['title'],
+          'salePrice': salePrice,
+          'sellValue': sellValue,
+          'adminFee': adminFee,
+          'accountType': accountType,
+        },
       );
       
       return {

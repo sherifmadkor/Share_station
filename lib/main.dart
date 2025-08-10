@@ -23,11 +23,25 @@ import 'presentation/screens/auth/register_screen.dart';
 import 'presentation/screens/user/user_dashboard.dart';
 import 'presentation/screens/admin/admin_dashboard.dart';
 import 'presentation/screens/admin/manage_contributions_screen.dart';
-// ADD THESE NEW IMPORTS
+
+// User screens
 import 'presentation/screens/user/add_contribution_screen.dart';
 import 'presentation/screens/user/my_contributions_screen.dart';
+import 'presentation/screens/user/my_borrowings_screen.dart';
 import 'presentation/screens/user/borrow_request_screen.dart';
-import 'presentation/screens/admin/admin_approval_dashboard.dart';
+import 'presentation/screens/user/borrow_game_screen.dart';
+import 'presentation/screens/user/browse_games_screen.dart';
+import 'presentation/screens/user/profile_screen.dart';
+import 'presentation/screens/user/points_redemption_screen.dart';
+import 'presentation/screens/user/balance_details_screen.dart';
+import 'presentation/screens/user/sell_game_screen.dart';
+import 'presentation/screens/user/queue_management_screen.dart';
+
+// Admin screens
+import 'presentation/screens/admin/manage_games_screen.dart';
+import 'presentation/screens/admin/manage_users_screen.dart';
+import 'presentation/screens/admin/analytics_screen.dart';
+import 'presentation/screens/admin/settings_screen.dart';
 
 // Import theme
 import 'core/theme/app_theme.dart';
@@ -114,10 +128,22 @@ class ShareStationApp extends StatelessWidget {
                   AppRoutes.pendingApprovals: (context) => const ManageContributionsScreen(),
                   AppRoutes.borrowRequests: (context) => const ManageBorrowRequestsScreen(),
 
-                  // ADD THESE NEW ROUTES
+                  // User routes
                   '/add-contribution': (context) => const AddContributionScreen(),
                   '/my-contributions': (context) => const MyContributionsScreen(),
-                  '/admin-approval-dashboard': (context) => const AdminApprovalDashboard(),
+                  '/my-borrowings': (context) => const MyBorrowingsScreen(),
+                  '/browse-games': (context) => const BrowseGamesScreen(),
+                  '/profile': (context) => const EnhancedProfileScreen(),
+                  '/points-redemption': (context) => const PointsRedemptionScreen(),
+                  '/balance-details': (context) => const BalanceDetailsScreen(),
+                  '/sell-game': (context) => const SellGameScreen(),
+                  '/queue-management': (context) => const QueueManagementScreen(),
+
+                  // Admin routes
+                  '/manage-games': (context) => const ManageGamesScreen(),
+                  '/manage-users': (context) => const ManageUsersScreen(),
+                  '/analytics': (context) => const AnalyticsScreen(),
+                  '/admin-settings': (context) => const SettingsScreen(),
                 },
 
                 // ADD THIS onGenerateRoute FOR ROUTES WITH PARAMETERS
@@ -128,6 +154,18 @@ class ShareStationApp extends StatelessWidget {
                     if (args != null && args['game'] != null) {
                       return MaterialPageRoute(
                         builder: (context) => BorrowRequestScreen(
+                          game: args['game'],
+                        ),
+                      );
+                    }
+                  }
+
+                  // Handle BorrowGameScreen which needs a game parameter
+                  if (settings.name == '/borrow-game') {
+                    final args = settings.arguments as Map<String, dynamic>?;
+                    if (args != null && args['game'] != null) {
+                      return MaterialPageRoute(
+                        builder: (context) => BorrowGameScreen(
                           game: args['game'],
                         ),
                       );

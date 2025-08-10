@@ -10,6 +10,7 @@ import 'queue_service.dart';
 import 'points_service.dart';
 import 'referral_service.dart';
 import 'metrics_service.dart';
+import 'analytics_service.dart';
 
 class BorrowService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -19,6 +20,7 @@ class BorrowService {
   final PointsService _pointsService = PointsService();
   final ReferralService _referralService = ReferralService();
   final MetricsService _metricsService = MetricsService();
+  final AnalyticsService _analyticsService = AnalyticsService();
 
   // RESERVATION WINDOW & COOLDOWN METHODS
 
@@ -38,15 +40,23 @@ class BorrowService {
   // Check if borrow window is open (admin controlled)
   Future<bool> isBorrowWindowOpen() async {
     try {
+      // First check system settings
+      final settingsDoc = await _firestore
+          .collection('settings')
+          .doc('system')
+          .get();
+      
+      if (settingsDoc.exists) {
+        return settingsDoc.data()?['isBorrowWindowOpen'] ?? false;
+      }
+      
+      // Fallback to old borrow_window document
       final doc = await _firestore
           .collection('settings')
           .doc('borrow_window')
           .get();
       
-      if (doc.exists) {
-        return doc.data()?['isOpen'] ?? false;
-      }
-      return false;
+      return doc.data()?['isOpen'] ?? false;
     } catch (e) {
       print('Error checking borrow window status: $e');
       return false;
@@ -511,6 +521,29 @@ class BorrowService {
         lenderTier: 'member', // Assuming member-contributed games
         borrowValue: actualBorrowValue,
         freeborrowingsRemaining: borrowerData['freeborrowings'] ?? 0,
+      );
+
+      // Track game borrowing analytics
+      await _analyticsService.trackGameBorrow(
+        gameId: data['gameId'],
+        gameTitle: data['gameTitle'],
+        borrowerId: data['userId'],
+        borrowValue: actualBorrowValue,
+        platform: data['platform'],
+        accountType: data['accountType'],
+      );
+
+      // Track user activity
+      await _analyticsService.trackUserActivity(
+        userId: data['userId'],
+        activityType: 'borrow',
+        metadata: {
+          'gameId': data['gameId'],
+          'gameTitle': data['gameTitle'],
+          'borrowValue': actualBorrowValue,
+          'platform': data['platform'],
+          'accountType': data['accountType'],
+        },
       );
 
       return {
