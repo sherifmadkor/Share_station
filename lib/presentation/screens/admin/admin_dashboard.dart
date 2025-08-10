@@ -1,14 +1,16 @@
-// lib/presentation/screens/admin/admin_dashboard.dart - Updated with Borrow Window Control
+// lib/presentation/screens/admin/admin_dashboard.dart - Complete Merged Version
 
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:google_nav_bar/google_nav_bar.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../routes/app_routes.dart';
 import '../../widgets/custom_loading.dart';
 import '../admin/manage_contributions_screen.dart';
 import '../admin/manage_borrow_requests_screen.dart';
@@ -18,6 +20,9 @@ import '../admin/analytics_screen.dart';
 import '../admin/settings_screen.dart';
 import '../../../services/suspension_service.dart';
 import '../../../services/balance_service.dart';
+import '../user/browse_games_screen.dart';
+import '../user/my_borrowings_screen.dart';
+import '../user/profile_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -28,8 +33,11 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final SuspensionService _suspensionService = SuspensionService();
   final BalanceService _balanceService = BalanceService();
+
+  int _selectedIndex = 0;
 
   // Statistics
   int _totalMembers = 0;
@@ -39,10 +47,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _pendingContributions = 0;
   int _pendingBorrows = 0;
   int _activeBorrows = 0;
+  double _totalRevenue = 0;
 
   // Borrow Window Status
   bool _isBorrowWindowOpen = false;
   bool _isUpdatingWindow = false;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -53,6 +63,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _loadStatistics() async {
+    setState(() => _isLoading = true);
+
     try {
       // Get member count
       final usersQuery = await _firestore
@@ -109,6 +121,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .count()
           .get();
 
+      // Calculate revenue
+      _totalRevenue = 0;
+      for (var doc in usersQuery.docs) {
+        _totalRevenue += (doc.data()['totalSpent'] ?? 0).toDouble();
+      }
+
       if (mounted) {
         setState(() {
           _totalMembers = usersQuery.docs.length;
@@ -122,6 +140,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
     } catch (e) {
       print('Error loading statistics: $e');
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -152,7 +172,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Future<void> _toggleBorrowWindow() async {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final isArabic = appProvider.isArabic;
+    final isArabic = appProvider.locale.languageCode == 'ar';
 
     // Show confirmation dialog
     final confirm = await showDialog<bool>(
@@ -252,10 +272,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       // Show notifications if there are changes
       if (mounted) {
-        // Balance expiry notifications
         if (balanceResult['expired'] > 0) {
-          print('Balance expiry check completed: ${balanceResult['expired']} entries expired for ${balanceResult['usersAffected']} users. Total: ${balanceResult['totalExpired']} LE');
-
+          print('Balance expiry check completed: ${balanceResult['expired']} entries expired');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -268,8 +286,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         }
 
         if (suspensionResult['suspended'] > 0) {
-          print('Suspension check completed: ${suspensionResult['suspended']} users suspended out of ${suspensionResult['checked']} checked');
-
+          print('Suspension check completed: ${suspensionResult['suspended']} users suspended');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -282,8 +299,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         }
 
         if (vipResult['promoted'] > 0) {
-          print('VIP promotion check completed: ${vipResult['promoted']} users promoted out of ${vipResult['checked']} checked');
-
+          print('VIP promotion check completed: ${vipResult['promoted']} users promoted');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -305,14 +321,91 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _logout() async {
+    final isArabic = Provider.of<AppProvider>(context, listen: false).locale.languageCode == 'ar';
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isArabic ? 'تسجيل الخروج' : 'Logout'),
+        content: Text(isArabic ? 'هل أنت متأكد من تسجيل الخروج؟' : 'Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(isArabic ? 'إلغاء' : 'Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final authProvider = context.read<AuthProvider>();
+              await authProvider.signOut();
+              Navigator.pushReplacementNamed(context, AppRoutes.login);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.errorColor,
+            ),
+            child: Text(isArabic ? 'خروج' : 'Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Initialize system settings (one-time setup) - KEEPING YOUR ORIGINAL VALUES
+  Future<void> _initializeSystemSettings() async {
+    try {
+      await _firestore.collection('settings').doc('system').set({
+        'membershipFee': 1500,
+        'clientFee': 750,
+        'vipWithdrawalFeePercentage': 20,
+        'adminFeePercentage': 10,
+        'pointsConversionRate': 25,
+        'balanceExpiryDays': 90,
+        'suspensionPeriodDays': 180,
+        'borrowWindowDay': 'thursday',
+        'isBorrowWindowOpen': true,
+        'allowNewRegistrations': true,
+        'maintenanceMode': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('System settings initialized successfully'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error initializing settings: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final appProvider = Provider.of<AppProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
-    final isArabic = appProvider.isArabic;
+    final isArabic = appProvider.locale.languageCode == 'ar';
     final isDarkMode = appProvider.isDarkMode;
 
+    // Define pages for bottom navigation
+    final List<Widget> _pages = [
+      _buildOriginalDashboardContent(isArabic, isDarkMode, authProvider),
+      const BrowseGamesScreen(), // Game Library
+      const MyBorrowingsScreen(), // My Borrowings
+      const EnhancedProfileScreen(), // Existing Profile Screen
+    ];
+
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: isDarkMode ? AppTheme.darkBackground : AppTheme.lightBackground,
       appBar: AppBar(
         backgroundColor: AppTheme.primaryColor,
@@ -326,7 +419,62 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          icon: Icon(Icons.menu, color: Colors.white),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
         actions: [
+          // Notifications with badge
+          IconButton(
+            icon: Stack(
+              children: [
+                Icon(Icons.notifications, color: Colors.white),
+                if (_pendingContributions + _pendingBorrows > 0)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        '${_pendingContributions + _pendingBorrows}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: () {
+              if (_pendingContributions >= _pendingBorrows) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageContributionsScreen(),
+                  ),
+                ).then((_) => _loadStatistics());
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageBorrowRequestsScreen(),
+                  ),
+                ).then((_) => _loadStatistics());
+              }
+            },
+          ),
+
+          // Refresh button
           IconButton(
             icon: Icon(Icons.refresh, color: Colors.white),
             onPressed: () {
@@ -336,133 +484,456 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await _loadStatistics();
-          await _loadBorrowWindowStatus();
-        },
-        child: SingleChildScrollView(
-          physics: AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.all(16.w),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Welcome Message
-              Text(
-                isArabic
-                    ? 'مرحباً، ${authProvider.currentUser?.name ?? 'Admin'}!'
-                    : 'Welcome, ${authProvider.currentUser?.name ?? 'Admin'}!',
-                style: TextStyle(
-                  fontSize: 24.sp,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 8.h),
-              Text(
-                isArabic ? 'إدارة النظام' : 'System Management',
-                style: TextStyle(
-                  fontSize: 16.sp,
-                  color: isDarkMode ? Colors.white70 : Colors.black54,
-                ),
-              ),
 
-              SizedBox(height: 24.h),
+      // Navigation Drawer
+      drawer: _buildNavigationDrawer(isArabic, isDarkMode, authProvider),
 
-              // Borrow Window Control - PROMINENT PLACEMENT
-              Container(
-                padding: EdgeInsets.all(16.w),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: _isBorrowWindowOpen
-                        ? [AppTheme.successColor.withOpacity(0.8), AppTheme.successColor]
-                        : [AppTheme.warningColor.withOpacity(0.8), AppTheme.warningColor],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+      body: _isLoading
+          ? Center(child: CircularProgressIndicator())
+          : _pages[_selectedIndex],
+
+      // Bottom Navigation
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: isDarkMode ? Colors.black : Colors.white,
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 20,
+              color: Colors.black.withOpacity(.1),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 15.w, vertical: 8.h),
+            child: GNav(
+              rippleColor: AppTheme.primaryColor.withOpacity(0.3),
+              hoverColor: AppTheme.primaryColor.withOpacity(0.1),
+              gap: 8,
+              activeColor: AppTheme.primaryColor,
+              iconSize: 24.sp,
+              padding: EdgeInsets.symmetric(horizontal: 15.w, vertical: 12.h),
+              duration: const Duration(milliseconds: 400),
+              tabBackgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+              color: Colors.grey,
+              tabs: [
+                GButton(
+                  icon: Icons.dashboard,
+                  text: isArabic ? 'لوحة التحكم' : 'Dashboard',
+                ),
+                GButton(
+                  icon: Icons.gamepad,
+                  text: isArabic ? 'مكتبة الألعاب' : 'Game Library',
+                ),
+                GButton(
+                  icon: FontAwesomeIcons.handHolding,
+                  text: isArabic ? 'استعاراتي' : 'My Borrowings',
+                ),
+                GButton(
+                  icon: Icons.person,
+                  text: isArabic ? 'الملف الشخصي' : 'Profile',
+                ),
+              ],
+              selectedIndex: _selectedIndex,
+              onTabChange: (index) {
+                setState(() {
+                  _selectedIndex = index;
+                });
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavigationDrawer(bool isArabic, bool isDarkMode, AuthProvider authProvider) {
+    final user = authProvider.currentUser;
+
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          // Drawer Header
+          DrawerHeader(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppTheme.primaryColor, AppTheme.primaryColor.withOpacity(0.7)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 30,
+                  backgroundColor: Colors.white,
+                  child: Icon(
+                    Icons.admin_panel_settings,
+                    size: 35,
+                    color: AppTheme.primaryColor,
                   ),
-                  borderRadius: BorderRadius.circular(16.r),
-                  boxShadow: [
-                    BoxShadow(
-                      color: (_isBorrowWindowOpen ? AppTheme.successColor : AppTheme.warningColor)
-                          .withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: Offset(0, 6),
-                    ),
-                  ],
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: EdgeInsets.all(12.w),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12.r),
-                      ),
-                      child: Icon(
-                        _isBorrowWindowOpen ? Icons.lock_open : Icons.lock,
-                        color: Colors.white,
-                        size: 28.sp,
-                      ),
-                    ),
-                    SizedBox(width: 16.w),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            isArabic ? 'نافذة الاستعارة' : 'Borrow Window',
-                            style: TextStyle(
-                              fontSize: 18.sp,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          SizedBox(height: 4.h),
-                          Text(
-                            _isBorrowWindowOpen
-                                ? (isArabic ? 'مفتوحة - يمكن للأعضاء الاستعارة' : 'Open - Members can borrow')
-                                : (isArabic ? 'مغلقة - لا يمكن الاستعارة' : 'Closed - Borrowing disabled'),
-                            style: TextStyle(
-                              fontSize: 14.sp,
-                              color: Colors.white.withOpacity(0.9),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: _isBorrowWindowOpen,
-                      onChanged: _isUpdatingWindow ? null : (_) => _toggleBorrowWindow(),
-                      activeColor: Colors.white,
-                      activeTrackColor: Colors.white.withOpacity(0.5),
-                      inactiveThumbColor: Colors.white,
-                      inactiveTrackColor: Colors.white.withOpacity(0.3),
-                    ),
-                  ],
+                SizedBox(height: 10),
+                Text(
+                  user?.name ?? 'Admin',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                Text(
+                  user?.email ?? '',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14.sp,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Management Section
+          _buildDrawerSection(
+            title: isArabic ? 'الإدارة' : 'Management',
+            isDarkMode: isDarkMode,
+          ),
+
+          ListTile(
+            leading: Icon(FontAwesomeIcons.clipboardCheck, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'الموافقات' : 'Approvals'),
+            trailing: Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(12),
               ),
-
-              SizedBox(height: 24.h),
-
-              // Statistics Overview
-              Text(
-                isArabic ? 'نظرة عامة' : 'Overview',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Text(
+                '${_pendingContributions + _pendingBorrows}',
+                style: TextStyle(color: Colors.white, fontSize: 12),
               ),
-              SizedBox(height: 12.h),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              if (_pendingContributions >= _pendingBorrows) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageContributionsScreen(),
+                  ),
+                ).then((_) => _loadStatistics());
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageBorrowRequestsScreen(),
+                  ),
+                ).then((_) => _loadStatistics());
+              }
+            },
+          ),
 
-              // Stats Grid
-              GridView.count(
-                shrinkWrap: true,
-                physics: NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                crossAxisSpacing: 12.w,
-                mainAxisSpacing: 12.h,
-                childAspectRatio: 1.2,
+          ListTile(
+            leading: Icon(Icons.people, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'إدارة المستخدمين' : 'Manage Users'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ManageUsersScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            },
+          ),
+
+          ListTile(
+            leading: Icon(Icons.gamepad, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'إدارة الألعاب' : 'Manage Games'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ManageGamesScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            },
+          ),
+
+          Divider(),
+
+          // Analytics Section
+          _buildDrawerSection(
+            title: isArabic ? 'التحليلات' : 'Analytics',
+            isDarkMode: isDarkMode,
+          ),
+
+          ListTile(
+            leading: Icon(Icons.analytics, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'التحليلات' : 'Analytics'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AnalyticsScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            },
+          ),
+
+          ListTile(
+            leading: Icon(Icons.assessment, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'التقارير' : 'Reports'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              setState(() => _selectedIndex = 2); // Switch to reports tab
+            },
+          ),
+
+          Divider(),
+
+          // Settings Section
+          _buildDrawerSection(
+            title: isArabic ? 'النظام' : 'System',
+            isDarkMode: isDarkMode,
+          ),
+
+          ListTile(
+            leading: Icon(Icons.settings, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'الإعدادات' : 'Settings'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              ).then((_) => _loadStatistics());
+            },
+          ),
+
+          ListTile(
+            leading: Icon(Icons.language, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'اللغة' : 'Language'),
+            trailing: Text(isArabic ? 'العربية' : 'English'),
+            onTap: () {
+              final appProvider = context.read<AppProvider>();
+              appProvider.toggleLanguage();
+              Navigator.pop(context);
+            },
+          ),
+
+          ListTile(
+            leading: Icon(
+              isDarkMode ? Icons.light_mode : Icons.dark_mode,
+              color: AppTheme.primaryColor,
+            ),
+            title: Text(isArabic ? 'المظهر' : 'Theme'),
+            trailing: Switch(
+              value: isDarkMode,
+              onChanged: (value) {
+                final appProvider = context.read<AppProvider>();
+                appProvider.toggleTheme();
+              },
+            ),
+          ),
+
+          Divider(),
+
+          // User Section
+          ListTile(
+            leading: Icon(Icons.person, color: AppTheme.primaryColor),
+            title: Text(isArabic ? 'الملف الشخصي' : 'Profile'),
+            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, AppRoutes.profileScreen);
+            },
+          ),
+
+          ListTile(
+            leading: Icon(Icons.logout, color: Colors.red),
+            title: Text(
+              isArabic ? 'تسجيل الخروج' : 'Logout',
+              style: TextStyle(color: Colors.red),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _logout();
+            },
+          ),
+
+          SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerSection({
+    required String title,
+    required bool isDarkMode,
+  }) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 12.sp,
+          fontWeight: FontWeight.bold,
+          color: Colors.grey,
+        ),
+      ),
+    );
+  }
+
+  // YOUR ORIGINAL DASHBOARD CONTENT
+  Widget _buildOriginalDashboardContent(bool isArabic, bool isDarkMode, AuthProvider authProvider) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadStatistics();
+        await _loadBorrowWindowStatus();
+      },
+      child: SingleChildScrollView(
+        physics: AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(16.w),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Welcome Message
+            Text(
+              isArabic
+                  ? 'مرحباً، ${authProvider.currentUser?.name ?? 'Admin'}!'
+                  : 'Welcome, ${authProvider.currentUser?.name ?? 'Admin'}!',
+              style: TextStyle(
+                fontSize: 24.sp,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8.h),
+            Text(
+              isArabic ? 'إدارة النظام' : 'System Management',
+              style: TextStyle(
+                fontSize: 16.sp,
+                color: isDarkMode ? Colors.white70 : Colors.black54,
+              ),
+            ),
+
+            SizedBox(height: 24.h),
+
+            // Borrow Window Control - PROMINENT PLACEMENT
+            Container(
+              padding: EdgeInsets.all(16.w),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: _isBorrowWindowOpen
+                      ? [AppTheme.successColor.withOpacity(0.8), AppTheme.successColor]
+                      : [AppTheme.warningColor.withOpacity(0.8), AppTheme.warningColor],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16.r),
+                boxShadow: [
+                  BoxShadow(
+                    color: (_isBorrowWindowOpen ? AppTheme.successColor : AppTheme.warningColor)
+                        .withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
                 children: [
-                  _buildStatCard(
+                  Container(
+                    padding: EdgeInsets.all(12.w),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12.r),
+                    ),
+                    child: Icon(
+                      _isBorrowWindowOpen ? Icons.lock_open : Icons.lock,
+                      color: Colors.white,
+                      size: 28.sp,
+                    ),
+                  ),
+                  SizedBox(width: 16.w),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isArabic ? 'نافذة الاستعارة' : 'Borrow Window',
+                          style: TextStyle(
+                            fontSize: 18.sp,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(height: 4.h),
+                        Text(
+                          _isBorrowWindowOpen
+                              ? (isArabic ? 'مفتوحة - يمكن للأعضاء الاستعارة' : 'Open - Members can borrow')
+                              : (isArabic ? 'مغلقة - لا يمكن الاستعارة' : 'Closed - Borrowing disabled'),
+                          style: TextStyle(
+                            fontSize: 14.sp,
+                            color: Colors.white.withOpacity(0.9),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _isBorrowWindowOpen,
+                    onChanged: _isUpdatingWindow ? null : (_) => _toggleBorrowWindow(),
+                    activeColor: Colors.white,
+                    activeTrackColor: Colors.white.withOpacity(0.5),
+                    inactiveThumbColor: Colors.white,
+                    inactiveTrackColor: Colors.white.withOpacity(0.3),
+                  ),
+                ],
+              ),
+            ),
+
+            SizedBox(height: 24.h),
+
+            // Statistics Overview
+            Text(
+              isArabic ? 'نظرة عامة' : 'Overview',
+              style: TextStyle(
+                fontSize: 18.sp,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 12.h),
+
+            // Stats Grid - YOUR ORIGINAL WITH CLICKABLE CARDS
+            GridView.count(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              crossAxisSpacing: 12.w,
+              mainAxisSpacing: 12.h,
+              childAspectRatio: 1.2,
+              children: [
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ManageUsersScreen(),
+                      ),
+                    ).then((_) => _loadStatistics());
+                  },
+                  borderRadius: BorderRadius.circular(12.r),
+                  child: _buildStatCard(
                     title: isArabic ? 'الأعضاء' : 'Members',
                     value: _totalMembers.toString(),
                     subtitle: '$_activeMembers ${isArabic ? "نشط" : "active"}',
@@ -470,7 +941,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     color: AppTheme.primaryColor,
                     isDarkMode: isDarkMode,
                   ),
-                  _buildStatCard(
+                ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ManageGamesScreen(),
+                      ),
+                    ).then((_) => _loadStatistics());
+                  },
+                  borderRadius: BorderRadius.circular(12.r),
+                  child: _buildStatCard(
                     title: isArabic ? 'الألعاب' : 'Games',
                     value: _totalGames.toString(),
                     subtitle: '$_activeGames ${isArabic ? "متاح" : "available"}',
@@ -478,7 +960,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     color: AppTheme.secondaryColor,
                     isDarkMode: isDarkMode,
                   ),
-                  _buildStatCard(
+                ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ManageContributionsScreen(),
+                      ),
+                    ).then((_) => _loadStatistics());
+                  },
+                  borderRadius: BorderRadius.circular(12.r),
+                  child: _buildStatCard(
                     title: isArabic ? 'مساهمات معلقة' : 'Pending Contributions',
                     value: _pendingContributions.toString(),
                     subtitle: isArabic ? 'بانتظار الموافقة' : 'Awaiting approval',
@@ -487,7 +980,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     isDarkMode: isDarkMode,
                     hasNotification: _pendingContributions > 0,
                   ),
-                  _buildStatCard(
+                ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ManageBorrowRequestsScreen(),
+                      ),
+                    ).then((_) => _loadStatistics());
+                  },
+                  borderRadius: BorderRadius.circular(12.r),
+                  child: _buildStatCard(
                     title: isArabic ? 'الاستعارات' : 'Borrows',
                     value: _activeBorrows.toString(),
                     subtitle: '$_pendingBorrows ${isArabic ? "معلق" : "pending"}',
@@ -496,43 +1000,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     isDarkMode: isDarkMode,
                     hasNotification: _pendingBorrows > 0,
                   ),
-                ],
-              ),
-
-              SizedBox(height: 24.h),
-
-              // Quick Actions Grid
-              Text(
-                isArabic ? 'الإجراءات السريعة' : 'Quick Actions',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
                 ),
+              ],
+            ),
+
+            SizedBox(height: 24.h),
+
+            // Quick Actions Grid - YOUR ORIGINAL
+            Text(
+              isArabic ? 'الإجراءات السريعة' : 'Quick Actions',
+              style: TextStyle(
+                fontSize: 18.sp,
+                fontWeight: FontWeight.bold,
               ),
-              SizedBox(height: 12.h),
+            ),
+            SizedBox(height: 12.h),
 
-              _buildAdminQuickActions(),
+            _buildAdminQuickActions(),
 
-              SizedBox(height: 24.h),
+            SizedBox(height: 24.h),
 
-              // System Maintenance Buttons
-              Text(
-                isArabic ? 'صيانة النظام' : 'System Maintenance',
-                style: TextStyle(
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                ),
+            // System Maintenance Buttons - YOUR ORIGINAL
+            Text(
+              isArabic ? 'صيانة النظام' : 'System Maintenance',
+              style: TextStyle(
+                fontSize: 18.sp,
+                fontWeight: FontWeight.bold,
               ),
-              SizedBox(height: 12.h),
+            ),
+            SizedBox(height: 12.h),
 
-              _buildAdminQuickButtons(),
-            ],
-          ),
+            _buildAdminQuickButtons(),
+          ],
         ),
       ),
     );
   }
 
+  // YOUR ORIGINAL WIDGETS - UNCHANGED
   Widget _buildStatCard({
     required String title,
     required String value,
@@ -618,106 +1123,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildActionTile({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-    bool hasNotification = false,
-  }) {
-    final isDarkMode = Provider.of<AppProvider>(context).isDarkMode;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12.r),
-      child: Container(
-        padding: EdgeInsets.all(16.w),
-        decoration: BoxDecoration(
-          color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-          borderRadius: BorderRadius.circular(12.r),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(12.w),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12.r),
-              ),
-              child: Icon(
-                icon,
-                color: color,
-                size: 24.sp,
-              ),
-            ),
-            SizedBox(width: 16.w),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 16.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (hasNotification) ...[
-                        SizedBox(width: 8.w),
-                        Container(
-                          padding: EdgeInsets.all(6.w),
-                          decoration: BoxDecoration(
-                            color: AppTheme.errorColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Text(
-                            '!',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10.sp,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  SizedBox(height: 4.h),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 14.sp,
-                      color: isDarkMode ? Colors.white60 : Colors.black54,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios,
-              size: 16.sp,
-              color: Colors.grey,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Admin Quick Actions Grid
+  // Admin Quick Actions Grid - YOUR ORIGINAL
   Widget _buildAdminQuickActions() {
     final appProvider = Provider.of<AppProvider>(context);
-    final isArabic = appProvider.isArabic;
+    final isArabic = appProvider.locale.languageCode == 'ar';
 
     return GridView.count(
       shrinkWrap: true,
@@ -725,7 +1134,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       crossAxisCount: 2,
       crossAxisSpacing: 12.w,
       mainAxisSpacing: 12.h,
-      childAspectRatio: 1.3, // Adjusted for 6 items (3 rows)
+      childAspectRatio: 1.3,
       children: [
         _buildAdminActionCard(
           title: isArabic ? 'لوحة الموافقات' : 'Approvals',
@@ -734,7 +1143,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
           color: AppTheme.warningColor,
           badge: (_pendingContributions + _pendingBorrows).toString(),
           onTap: () {
-            // Navigate to contributions if more pending contributions, otherwise borrows
             if (_pendingContributions >= _pendingBorrows) {
               Navigator.push(
                 context,
@@ -816,7 +1224,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // Admin Action Card Widget
+  // Admin Action Card Widget - YOUR ORIGINAL
   Widget _buildAdminActionCard({
     required String title,
     required String subtitle,
@@ -909,10 +1317,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // System Maintenance Quick Buttons
+  // System Maintenance Quick Buttons - YOUR ORIGINAL
   Widget _buildAdminQuickButtons() {
     final appProvider = Provider.of<AppProvider>(context);
-    final isArabic = appProvider.isArabic;
+    final isArabic = appProvider.locale.languageCode == 'ar';
 
     return Wrap(
       spacing: 8.w,
@@ -920,7 +1328,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       children: [
         ElevatedButton.icon(
           onPressed: () async {
-            // Run suspension check
             try {
               final result = await _suspensionService.checkAndApplySuspensions();
               if (mounted) {
@@ -961,7 +1368,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
         ElevatedButton.icon(
           onPressed: () async {
-            // Check balance expiry
             try {
               final result = await _balanceService.checkAndExpireBalances();
               if (mounted) {
@@ -1001,8 +1407,50 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
 
         ElevatedButton.icon(
+          onPressed: () async {
+            try {
+              final result = await _suspensionService.batchCheckVIPPromotions();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Checked ${result['checked']} users, promoted ${result['promoted']} to VIP',
+                    ),
+                    backgroundColor: AppTheme.successColor,
+                  ),
+                );
+                if (result['promoted'] > 0) {
+                  _loadStatistics();
+                }
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: AppTheme.errorColor,
+                  ),
+                );
+              }
+            }
+          },
+          icon: Icon(FontAwesomeIcons.crown, size: 16.sp),
+          label: Text(
+            isArabic ? 'فحص ترقيات VIP' : 'Check VIP Promotions',
+            style: TextStyle(fontSize: 12.sp),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.successColor,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+          ),
+        ),
+
+        ElevatedButton.icon(
           onPressed: () {
-            _navigateToPointsManagement();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Points Management - Coming Soon')),
+            );
           },
           icon: Icon(FontAwesomeIcons.coins, size: 16.sp),
           label: Text(
@@ -1018,7 +1466,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
         ElevatedButton.icon(
           onPressed: () {
-            _navigateToQueueMonitoring();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Queue Monitoring - Coming Soon')),
+            );
           },
           icon: Icon(Icons.queue, size: 16.sp),
           label: Text(
@@ -1031,90 +1481,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
           ),
         ),
-        
-        ElevatedButton.icon(
-          onPressed: () => Navigator.pushNamed(context, '/analytics'),
-          icon: Icon(Icons.analytics, size: 16.sp),
-          label: Text(
-            isArabic ? 'التحليلات' : 'Analytics',
-            style: TextStyle(fontSize: 12.sp),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primaryColor,
-            foregroundColor: Colors.white,
-            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-          ),
-        ),
-
-        ElevatedButton.icon(
-          onPressed: () => Navigator.pushNamed(context, '/admin-settings'),
-          icon: Icon(Icons.settings, size: 16.sp),
-          label: Text(
-            isArabic ? 'الإعدادات' : 'Settings',
-            style: TextStyle(fontSize: 12.sp),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.secondaryColor,
-            foregroundColor: Colors.white,
-            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-          ),
-        ),
       ],
-    );
-  }
-
-  // Initialize system settings (one-time setup)
-  Future<void> _initializeSystemSettings() async {
-    try {
-      await _firestore.collection('settings').doc('system').set({
-        'membershipFee': 1500,
-        'clientFee': 750,
-        'vipWithdrawalFeePercentage': 20,
-        'adminFeePercentage': 10,
-        'pointsConversionRate': 25,
-        'balanceExpiryDays': 90,
-        'suspensionPeriodDays': 180,
-        'borrowWindowDay': 'thursday',
-        'isBorrowWindowOpen': true,
-        'allowNewRegistrations': true,
-        'maintenanceMode': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('System settings initialized successfully'),
-            backgroundColor: AppTheme.successColor,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error initializing settings: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
-        );
-      }
-    }
-  }
-
-  // Navigation methods
-  void _navigateToReports() {
-    _initializeSystemSettings(); // Initialize settings when accessing reports
-  }
-
-  void _navigateToPointsManagement() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Points Management - Coming Soon')),
-    );
-  }
-
-  void _navigateToQueueMonitoring() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Queue Monitoring - Coming Soon')),
     );
   }
 }

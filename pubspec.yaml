@@ -40,6 +40,8 @@ dependencies:
   percent_indicator: ^4.2.3
   # State Management
   provider: ^6.1.1
+  share_plus: ^7.2.1
+  flutter_speed_dial: ^6.2.0
 
   # UI & Navigation
   flutter_screenutil: ^5.9.0

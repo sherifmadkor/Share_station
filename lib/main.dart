@@ -1,3 +1,5 @@
+// lib/main.dart - Updated routes section
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -6,49 +8,45 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
-import 'presentation/screens/admin/manage_contributions_screen.dart';
-import 'presentation/screens/admin/manage_borrow_requests_screen.dart';
-// Import providers
 import 'presentation/providers/app_provider.dart';
 import 'presentation/providers/auth_provider.dart';
 import 'presentation/providers/game_provider.dart';
-// Temporarily comment out missing providers
-// import 'presentation/providers/user_provider.dart';
+import 'core/theme/app_theme.dart';
 
-// Import screens
+// Import all screens
 import 'presentation/screens/common/splash_screen.dart';
 import 'presentation/screens/common/main_layout.dart';
 import 'presentation/screens/auth/login_screen.dart';
 import 'presentation/screens/auth/register_screen.dart';
-import 'presentation/screens/user/user_dashboard.dart';
-import 'presentation/screens/admin/admin_dashboard.dart';
-import 'presentation/screens/admin/manage_contributions_screen.dart';
 
 // User screens
-import 'presentation/screens/user/add_contribution_screen.dart';
-import 'presentation/screens/user/my_contributions_screen.dart';
-import 'presentation/screens/user/my_borrowings_screen.dart';
-import 'presentation/screens/user/borrow_request_screen.dart';
-import 'presentation/screens/user/borrow_game_screen.dart';
+import 'presentation/screens/user/user_dashboard.dart';
 import 'presentation/screens/user/browse_games_screen.dart';
+import 'presentation/screens/user/borrow_game_screen.dart';
+import 'presentation/screens/user/my_contributions_screen.dart';
+import 'presentation/screens/user/add_contribution_screen.dart';
 import 'presentation/screens/user/profile_screen.dart';
 import 'presentation/screens/user/points_redemption_screen.dart';
 import 'presentation/screens/user/balance_details_screen.dart';
-import 'presentation/screens/user/sell_game_screen.dart';
 import 'presentation/screens/user/queue_management_screen.dart';
+import 'presentation/screens/user/sell_game_screen.dart';
+// TODO: Create these screens when needed
+// import 'presentation/screens/user/referral_dashboard_screen.dart';
+// import 'presentation/screens/user/client_dashboard_screen.dart';
+// import 'presentation/screens/user/leaderboard_screen.dart';
+// import 'presentation/screens/user/net_metrics_dashboard_screen.dart';
 
 // Admin screens
+import 'presentation/screens/admin/admin_dashboard.dart';
+// TODO: Create AdminApprovalDashboard screen
+// import 'presentation/screens/admin/admin_approval_dashboard.dart';
 import 'presentation/screens/admin/manage_games_screen.dart';
 import 'presentation/screens/admin/manage_users_screen.dart';
 import 'presentation/screens/admin/analytics_screen.dart';
 import 'presentation/screens/admin/settings_screen.dart';
 
-// Import theme
-import 'core/theme/app_theme.dart';
-
-// Import routes
+// Routes
 import 'routes/app_routes.dart';
-// import 'routes/route_generator.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,13 +83,11 @@ class ShareStationApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AppProvider(prefs)),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => GameProvider()),
-        // Temporarily comment out missing providers
-        // ChangeNotifierProvider(create: (_) => UserProvider()),
       ],
       child: Consumer<AppProvider>(
         builder: (context, appProvider, _) {
           return ScreenUtilInit(
-            designSize: const Size(375, 812), // iPhone X size as reference
+            designSize: const Size(375, 812),
             minTextAdapt: true,
             splitScreenMode: true,
             builder: (context, child) {
@@ -115,65 +111,42 @@ class ShareStationApp extends StatelessWidget {
                   GlobalWidgetsLocalizations.delegate,
                   GlobalCupertinoLocalizations.delegate,
                 ],
-
-                // Routes - UPDATED WITH NEW ROUTES
                 initialRoute: AppRoutes.splash,
                 routes: {
+                  // Authentication Routes
                   AppRoutes.splash: (context) => const SplashScreen(),
                   AppRoutes.login: (context) => const LoginScreen(),
                   AppRoutes.register: (context) => const RegisterScreen(),
-                  AppRoutes.userDashboard: (context) => const MainLayout(),
-                  AppRoutes.adminDashboard: (context) => const MainLayout(),
-                  AppRoutes.manageContributions: (context) => const ManageContributionsScreen(),
-                  AppRoutes.pendingApprovals: (context) => const ManageContributionsScreen(),
-                  AppRoutes.borrowRequests: (context) => const ManageBorrowRequestsScreen(),
 
-                  // User routes
-                  '/add-contribution': (context) => const AddContributionScreen(),
-                  '/my-contributions': (context) => const MyContributionsScreen(),
-                  '/my-borrowings': (context) => const MyBorrowingsScreen(),
-                  '/browse-games': (context) => const BrowseGamesScreen(),
-                  '/profile': (context) => const EnhancedProfileScreen(),
-                  '/points-redemption': (context) => const PointsRedemptionScreen(),
-                  '/balance-details': (context) => const BalanceDetailsScreen(),
-                  '/sell-game': (context) => const SellGameScreen(),
-                  '/queue-management': (context) => const QueueManagementScreen(),
+                  // Main Layout
+                  AppRoutes.mainLayout: (context) => const MainLayout(),
 
-                  // Admin routes
-                  '/manage-games': (context) => const ManageGamesScreen(),
-                  '/manage-users': (context) => const ManageUsersScreen(),
-                  '/analytics': (context) => const AnalyticsScreen(),
-                  '/admin-settings': (context) => const SettingsScreen(),
-                },
+                  // User Routes
+                  AppRoutes.userDashboard: (context) => const UserDashboard(),
+                  AppRoutes.browseGames: (context) => const BrowseGamesScreen(),
+                  AppRoutes.myContributions: (context) => const MyContributionsScreen(),
+                  AppRoutes.addContribution: (context) => const AddContributionScreen(),
+                  AppRoutes.profileScreen: (context) => const EnhancedProfileScreen(),
 
-                // ADD THIS onGenerateRoute FOR ROUTES WITH PARAMETERS
-                onGenerateRoute: (settings) {
-                  // Handle BorrowRequestScreen which needs a game parameter
-                  if (settings.name == '/borrow-request') {
-                    final args = settings.arguments as Map<String, dynamic>?;
-                    if (args != null && args['game'] != null) {
-                      return MaterialPageRoute(
-                        builder: (context) => BorrowRequestScreen(
-                          game: args['game'],
-                        ),
-                      );
-                    }
-                  }
+                  // User Metrics & Features Routes
+                  AppRoutes.pointsRedemption: (context) => const PointsRedemptionScreen(),
+                  AppRoutes.balanceDetails: (context) => const BalanceDetailsScreen(),
+                  AppRoutes.queueManagement: (context) => const QueueManagementScreen(),
+                  AppRoutes.sellGame: (context) => const SellGameScreen(),
+                  // TODO: Create these screens later
+                  // AppRoutes.referralDashboard: (context) => const ReferralDashboardScreen(),
+                  // AppRoutes.clientDashboard: (context) => const ClientDashboardScreen(),
+                  // AppRoutes.leaderboard: (context) => const LeaderboardScreen(),
+                  // AppRoutes.netMetrics: (context) => const NetMetricsDashboardScreen(),
 
-                  // Handle BorrowGameScreen which needs a game parameter
-                  if (settings.name == '/borrow-game') {
-                    final args = settings.arguments as Map<String, dynamic>?;
-                    if (args != null && args['game'] != null) {
-                      return MaterialPageRoute(
-                        builder: (context) => BorrowGameScreen(
-                          game: args['game'],
-                        ),
-                      );
-                    }
-                  }
-
-                  // Return null for unhandled routes
-                  return null;
+                  // Admin Routes
+                  AppRoutes.adminDashboard: (context) => const AdminDashboard(),
+                  // TODO: Create AdminApprovalDashboard screen
+                  // AppRoutes.adminApproval: (context) => const AdminApprovalDashboard(),
+                  AppRoutes.manageGames: (context) => const ManageGamesScreen(),
+                  AppRoutes.manageUsers: (context) => const ManageUsersScreen(),
+                  AppRoutes.adminAnalytics: (context) => const AnalyticsScreen(),
+                  AppRoutes.adminSettings: (context) => const SettingsScreen(),
                 },
 
                 // Builder for RTL support
