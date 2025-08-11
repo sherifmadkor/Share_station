@@ -43,22 +43,35 @@ class QueueService {
         };
       }
 
-      // Get current active queue for this specific slot, ordered by priority
+      // Get current active queue for this specific slot - simplified query to avoid index issues
       final queueSnapshot = await _firestore
           .collection('game_queues')
           .where('gameId', isEqualTo: gameId)
-          .where('accountId', isEqualTo: accountId)
-          .where('platform', isEqualTo: platform)
-          .where('accountType', isEqualTo: accountType)
           .where('status', isEqualTo: 'active')
-          .orderBy('contributionScore', descending: true)
-          .orderBy('joinedAt', descending: false)
           .get();
 
-      // Calculate position based on contribution score priority
-      int position = 1;
-      final queueEntries = queueSnapshot.docs.map((doc) => doc.data()).toList();
+      // Filter and calculate position based on the specific slot and contribution score priority
+      final queueEntries = queueSnapshot.docs
+          .map((doc) => doc.data())
+          .where((entry) => 
+              entry['accountId'] == accountId &&
+              entry['platform'] == platform &&
+              entry['accountType'] == accountType)
+          .toList();
       
+      // Sort in memory to avoid complex Firestore queries
+      queueEntries.sort((a, b) {
+        final aScore = (a['contributionScore'] ?? 0.0).toDouble();
+        final bScore = (b['contributionScore'] ?? 0.0).toDouble();
+        if (aScore != bScore) {
+          return bScore.compareTo(aScore); // Higher score first
+        }
+        final aTime = (a['joinedAt'] as Timestamp).toDate();
+        final bTime = (b['joinedAt'] as Timestamp).toDate();
+        return aTime.compareTo(bTime); // Earlier time first if scores equal
+      });
+      
+      int position = 1;
       for (var entry in queueEntries) {
         final entryScore = (entry['contributionScore'] ?? 0.0).toDouble();
         final entryJoinedAt = (entry['joinedAt'] as Timestamp).toDate();
@@ -355,22 +368,39 @@ class QueueService {
     String accountType,
   ) async {
     try {
-      // Get all active queue entries ordered by priority
+      // Get all active queue entries - simplified query
       final queueSnapshot = await _firestore
           .collection('game_queues')
           .where('gameId', isEqualTo: gameId)
-          .where('accountId', isEqualTo: accountId)
-          .where('platform', isEqualTo: platform)
-          .where('accountType', isEqualTo: accountType)
           .where('status', isEqualTo: 'active')
-          .orderBy('contributionScore', descending: true)
-          .orderBy('joinedAt', descending: false)
           .get();
+
+      // Filter for specific slot in memory
+      final filteredDocs = queueSnapshot.docs.where((doc) {
+        final data = doc.data();
+        return data['accountId'] == accountId &&
+               data['platform'] == platform &&
+               data['accountType'] == accountType;
+      }).toList();
+
+      // Sort by priority in memory
+      filteredDocs.sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        final aScore = (aData['contributionScore'] ?? 0.0).toDouble();
+        final bScore = (bData['contributionScore'] ?? 0.0).toDouble();
+        if (aScore != bScore) {
+          return bScore.compareTo(aScore); // Higher score first
+        }
+        final aTime = (aData['joinedAt'] as Timestamp).toDate();
+        final bTime = (bData['joinedAt'] as Timestamp).toDate();
+        return aTime.compareTo(bTime); // Earlier time first
+      });
 
       final batch = _firestore.batch();
       int position = 1;
 
-      for (var doc in queueSnapshot.docs) {
+      for (var doc in filteredDocs) {
         final estimatedAvailability = _calculateEstimatedAvailability(position);
         
         batch.update(doc.reference, {
@@ -445,14 +475,22 @@ class QueueService {
           .collection('game_queues')
           .where('userId', isEqualTo: userId)
           .where('status', isEqualTo: 'active')
-          .orderBy('joinedAt', descending: true)
           .get();
 
-      return query.docs.map((doc) {
+      final results = query.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id; // Add document ID
         return data;
       }).toList();
+
+      // Sort by joinedAt in memory
+      results.sort((a, b) {
+        final aTime = (a['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final bTime = (b['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        return bTime.compareTo(aTime); // Descending
+      });
+
+      return results;
     } catch (e) {
       print('Error getting user queue entries: $e');
       return [];
@@ -465,18 +503,74 @@ class QueueService {
       final query = await _firestore
           .collection('game_queues')
           .where('status', isEqualTo: 'active')
-          .orderBy('contributionScore', descending: true)
-          .orderBy('joinedAt', descending: false)
-          .limit(50) // Limit for performance
           .get();
 
-      return query.docs.map((doc) {
+      List<Map<String, dynamic>> results = [];
+      
+      // Process each document and fetch user details
+      for (var doc in query.docs) {
         final data = doc.data();
         data['id'] = doc.id; // Add document ID
         // Add priority field for UI display
         data['priority'] = data['contributionScore'] ?? 0.0;
-        return data;
-      }).toList();
+        
+        // Get detailed user information
+        try {
+          final userDoc = await _firestore
+              .collection('users')
+              .doc(data['userId'])
+              .get();
+          
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            data['userEmail'] = userData['email'] ?? 'N/A';
+            data['userPhone'] = userData['phoneNumber'] ?? userData['phone'] ?? 'N/A';
+            data['userTier'] = userData['tier'] ?? 'N/A';
+            data['userTotalShares'] = userData['totalShares'] ?? 0;
+            data['userFirstName'] = userData['firstName'] ?? '';
+            data['userLastName'] = userData['lastName'] ?? '';
+            data['userFullName'] = '${userData['firstName'] ?? ''} ${userData['lastName'] ?? ''}'.trim();
+            
+            // If userName is not set in queue, use full name from user profile
+            if ((data['userName'] ?? '').isEmpty) {
+              data['userName'] = data['userFullName'].isNotEmpty 
+                  ? data['userFullName'] 
+                  : userData['name'] ?? 'Unknown User';
+            }
+          } else {
+            // Set defaults if user document doesn't exist
+            data['userEmail'] = 'N/A';
+            data['userPhone'] = 'N/A';
+            data['userTier'] = 'N/A';
+            data['userTotalShares'] = 0;
+            data['userFullName'] = 'Unknown User';
+          }
+        } catch (userError) {
+          print('Error fetching user details for ${data['userId']}: $userError');
+          // Set defaults on error
+          data['userEmail'] = 'N/A';
+          data['userPhone'] = 'N/A';
+          data['userTier'] = 'N/A';
+          data['userTotalShares'] = 0;
+        }
+        
+        results.add(data);
+      }
+
+      // Sort by priority in memory
+      results.sort((a, b) {
+        final aScore = (a['contributionScore'] ?? 0.0).toDouble();
+        final bScore = (b['contributionScore'] ?? 0.0).toDouble();
+        if (aScore != bScore) {
+          return bScore.compareTo(aScore); // Higher score first
+        }
+        final aTime = (a['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final bTime = (b['joinedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+        return aTime.compareTo(bTime); // Earlier time first if scores equal
+      });
+
+      // Limit for performance
+      return results.take(50).toList();
     } catch (e) {
       print('Error getting all queue entries: $e');
       return [];
@@ -511,6 +605,308 @@ class QueueService {
     } catch (e) {
       print('Error removing from queue: $e');
       throw Exception('Failed to remove from queue: $e');
+    }
+  }
+
+  // Get queue information for a specific game slot including return estimate
+  Future<Map<String, dynamic>> getSlotQueueInfo({
+    required String gameId,
+    required String accountId,
+    required String platform,
+    required String accountType,
+  }) async {
+    try {
+      // Get current borrower information if slot is taken
+      Map<String, dynamic>? currentBorrow;
+      DateTime? estimatedReturnDate;
+      
+      // Check if slot is currently borrowed
+      final borrowQuery = await _firestore
+          .collection('borrow_requests')
+          .where('gameId', isEqualTo: gameId)
+          .where('accountId', isEqualTo: accountId)
+          .where('platform', isEqualTo: platform)
+          .where('accountType', isEqualTo: accountType)
+          .where('status', isEqualTo: 'approved')
+          .limit(1)
+          .get();
+      
+      if (borrowQuery.docs.isNotEmpty) {
+        final borrowData = borrowQuery.docs.first.data();
+        currentBorrow = borrowData;
+        
+        // Calculate estimated return date (30 days from approval)
+        final approvalDate = (borrowData['approvalDate'] as Timestamp?)?.toDate();
+        if (approvalDate != null) {
+          estimatedReturnDate = approvalDate.add(Duration(days: 30));
+        }
+      }
+      
+      // Get queue count
+      final queueCount = await _firestore
+          .collection('game_queues')
+          .where('gameId', isEqualTo: gameId)
+          .where('accountId', isEqualTo: accountId)
+          .where('platform', isEqualTo: platform)
+          .where('accountType', isEqualTo: accountType)
+          .where('status', isEqualTo: 'active')
+          .count()
+          .get();
+      
+      return {
+        'isBorrowed': currentBorrow != null,
+        'currentBorrower': currentBorrow?['userName'],
+        'borrowerId': currentBorrow?['userId'],
+        'estimatedReturnDate': estimatedReturnDate,
+        'daysUntilReturn': estimatedReturnDate != null 
+            ? estimatedReturnDate.difference(DateTime.now()).inDays
+            : null,
+        'queueCount': queueCount.count ?? 0,
+        'estimatedWaitDays': (queueCount.count ?? 0) * 30, // 30 days per person
+      };
+    } catch (e) {
+      print('Error getting slot queue info: $e');
+      return {
+        'isBorrowed': false,
+        'queueCount': 0,
+      };
+    }
+  }
+
+  // Auto-create borrow request when user reaches front of queue
+  Future<Map<String, dynamic>> createBorrowRequestFromQueue({
+    required String queueEntryId,
+    required Map<String, dynamic> queueData,
+  }) async {
+    try {
+      // Create borrow request with pending status for admin approval
+      final borrowRequest = {
+        'userId': queueData['userId'],
+        'userName': queueData['userName'],
+        'memberId': queueData['memberId'],
+        'gameId': queueData['gameId'],
+        'gameTitle': queueData['gameTitle'],
+        'accountId': queueData['accountId'],
+        'platform': queueData['platform'],
+        'accountType': queueData['accountType'],
+        'gameValue': queueData['gameValue'] ?? 0,
+        'borrowValue': queueData['borrowValue'] ?? 0,
+        'status': 'pending',
+        'fromQueue': true,
+        'queueEntryId': queueEntryId,
+        'queuePosition': 1, // They were first in line
+        'requestDate': FieldValue.serverTimestamp(),
+        'autoCreated': true,
+        'autoCreatedAt': FieldValue.serverTimestamp(),
+      };
+      
+      final docRef = await _firestore.collection('borrow_requests').add(borrowRequest);
+      
+      // Update queue entry status
+      await _firestore.collection('game_queues').doc(queueEntryId).update({
+        'status': 'processing',
+        'borrowRequestId': docRef.id,
+        'processedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Send notification to user (implement push notification here)
+      // await _notificationService.sendQueueReadyNotification(queueData['userId']);
+      
+      return {
+        'success': true,
+        'borrowRequestId': docRef.id,
+        'message': 'Borrow request created for user at front of queue',
+      };
+    } catch (e) {
+      print('Error creating borrow request from queue: $e');
+      return {
+        'success': false,
+        'message': 'Failed to create borrow request: $e',
+      };
+    }
+  }
+
+  // Get detailed queue information for admin
+  Future<List<Map<String, dynamic>>> getAdminQueueDetails({
+    required String gameId,
+    String? accountId,
+    String? platform,
+    String? accountType,
+  }) async {
+    try {
+      Query query = _firestore
+          .collection('game_queues')
+          .where('gameId', isEqualTo: gameId)
+          .where('status', isEqualTo: 'active');
+      
+      if (accountId != null) {
+        query = query.where('accountId', isEqualTo: accountId);
+      }
+      if (platform != null) {
+        query = query.where('platform', isEqualTo: platform);
+      }
+      if (accountType != null) {
+        query = query.where('accountType', isEqualTo: accountType);
+      }
+      
+      final snapshot = await query.get();
+      
+      List<Map<String, dynamic>> queueDetails = [];
+      
+      for (var doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        
+        // Get user details
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(data['userId'])
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          data['userEmail'] = userData['email'];
+          data['userPhone'] = userData['phoneNumber'];
+          data['userTier'] = userData['tier'];
+          data['userTotalShares'] = userData['totalShares'];
+        }
+        
+        queueDetails.add(data);
+      }
+      
+      // Sort by position
+      queueDetails.sort((a, b) => (a['position'] ?? 999).compareTo(b['position'] ?? 999));
+      
+      return queueDetails;
+    } catch (e) {
+      print('Error getting admin queue details: $e');
+      return [];
+    }
+  }
+
+  // Get games with active queues (for admin main queue screen)
+  Future<List<Map<String, dynamic>>> getGamesWithQueues() async {
+    try {
+      final query = await _firestore
+          .collection('game_queues')
+          .where('status', isEqualTo: 'active')
+          .get();
+
+      Map<String, Map<String, dynamic>> gameGroups = {};
+      
+      for (var doc in query.docs) {
+        final data = doc.data();
+        final gameId = data['gameId'];
+        final gameTitle = data['gameTitle'] ?? 'Unknown Game';
+        
+        if (!gameGroups.containsKey(gameId)) {
+          gameGroups[gameId] = {
+            'gameId': gameId,
+            'gameTitle': gameTitle,
+            'totalQueue': 0,
+            'accounts': <String, Map<String, dynamic>>{},
+          };
+        }
+        
+        // Group by account and platform
+        final accountKey = '${data['accountId']}_${data['platform']}_${data['accountType']}';
+        final accountInfo = '${data['platform']?.toUpperCase()} - ${data['accountType']}';
+        
+        if (!gameGroups[gameId]!['accounts'].containsKey(accountKey)) {
+          gameGroups[gameId]!['accounts'][accountKey] = {
+            'accountId': data['accountId'],
+            'platform': data['platform'],
+            'accountType': data['accountType'],
+            'displayName': accountInfo,
+            'queueCount': 0,
+          };
+        }
+        
+        gameGroups[gameId]!['totalQueue']++;
+        gameGroups[gameId]!['accounts'][accountKey]['queueCount']++;
+      }
+      
+      final result = gameGroups.values.map((game) {
+        game['accountsList'] = (game['accounts'] as Map).values.toList();
+        game.remove('accounts');
+        return game;
+      }).toList();
+      
+      // Sort by total queue count descending
+      result.sort((a, b) => (b['totalQueue'] as int).compareTo(a['totalQueue'] as int));
+      
+      return result;
+    } catch (e) {
+      print('Error getting games with queues: $e');
+      return [];
+    }
+  }
+
+  // Reorder queue (admin only)
+  Future<Map<String, dynamic>> reorderQueue({
+    required String queueEntryId,
+    required int newPosition,
+    required String gameId,
+    required String accountId,
+    required String platform,
+    required String accountType,
+  }) async {
+    try {
+      // Get all active queue entries for this slot
+      final queueSnapshot = await _firestore
+          .collection('game_queues')
+          .where('gameId', isEqualTo: gameId)
+          .where('accountId', isEqualTo: accountId)
+          .where('platform', isEqualTo: platform)
+          .where('accountType', isEqualTo: accountType)
+          .where('status', isEqualTo: 'active')
+          .orderBy('position')
+          .get();
+      
+      final batch = _firestore.batch();
+      final entries = queueSnapshot.docs;
+      
+      // Find the entry to move
+      final entryToMove = entries.firstWhere((doc) => doc.id == queueEntryId);
+      final oldPosition = (entryToMove.data() as Map<String, dynamic>)['position'];
+      
+      // Reorder entries
+      for (var doc in entries) {
+        final currentPos = (doc.data() as Map<String, dynamic>)['position'];
+        int updatedPos = currentPos;
+        
+        if (doc.id == queueEntryId) {
+          updatedPos = newPosition;
+        } else if (oldPosition < newPosition && currentPos > oldPosition && currentPos <= newPosition) {
+          updatedPos = currentPos - 1;
+        } else if (oldPosition > newPosition && currentPos >= newPosition && currentPos < oldPosition) {
+          updatedPos = currentPos + 1;
+        }
+        
+        if (updatedPos != currentPos) {
+          batch.update(doc.reference, {
+            'position': updatedPos,
+            'estimatedAvailability': Timestamp.fromDate(
+              DateTime.now().add(Duration(days: updatedPos * 30))
+            ),
+            'updatedAt': FieldValue.serverTimestamp(),
+            'reorderedBy': 'admin',
+          });
+        }
+      }
+      
+      await batch.commit();
+      
+      return {
+        'success': true,
+        'message': 'Queue reordered successfully',
+      };
+    } catch (e) {
+      print('Error reordering queue: $e');
+      return {
+        'success': false,
+        'message': 'Failed to reorder queue: $e',
+      };
     }
   }
 }

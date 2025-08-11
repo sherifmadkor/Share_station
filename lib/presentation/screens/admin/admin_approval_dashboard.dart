@@ -220,6 +220,15 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
                 case 'update_revenue_status':
                   _updateReferralRevenueStatus();
                   break;
+                case 'fix_missing_balances':
+                  _fixMissingReferralBalances();
+                  break;
+                case 'diagnose_referrals':
+                  _showDiagnosticDialog();
+                  break;
+                case 'complete_referral_fix':
+                  _showCompleteReferralFix();
+                  break;
                 case 'refresh':
                   _loadPendingCounts();
                   break;
@@ -239,6 +248,30 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
                 child: ListTile(
                   leading: Icon(FontAwesomeIcons.coins),
                   title: Text('Update Revenue Status'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'fix_missing_balances',
+                child: ListTile(
+                  leading: Icon(Icons.build),
+                  title: Text('Fix Missing Balances'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'diagnose_referrals',
+                child: ListTile(
+                  leading: Icon(Icons.bug_report),
+                  title: Text('Diagnose Referrals'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'complete_referral_fix',
+                child: ListTile(
+                  leading: Icon(Icons.build_circle, color: Colors.red),
+                  title: Text('Complete Referral Fix', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
@@ -1032,6 +1065,410 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
     }
   }
 
+  Future<void> _fixMissingReferralBalances() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Fix Missing Referral Balances'),
+          content: Text(
+            'This will scan all referral records and create missing balance entries for approved users who should have received referral rewards. This fixes the issue where referral commissions weren\'t credited to users\' balances.\n\nProceed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Fix Now'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.warningColor,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Expanded(
+                  child: Text('Fixing missing referral balances...\nThis may take a few moments.'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      try {
+        final referralService = ReferralService();
+        final result = await referralService.fixMissingReferralBalances();
+        
+        Navigator.of(context).pop(); // Close loading dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Operation completed'),
+            backgroundColor: result['success'] == true
+                ? AppTheme.successColor 
+                : AppTheme.errorColor,
+            duration: Duration(seconds: 5),
+          ),
+        );
+
+        // Show detailed results if successful
+        if (result['success'] == true) {
+          showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                title: Text('Fix Results'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('✅ Fixed ${result['fixedCount']} referrals'),
+                    SizedBox(height: 8),
+                    Text('💰 Total amount restored: ${result['totalAmount']} LE'),
+                    SizedBox(height: 16),
+                    Text(
+                      'Users can now see their referral commissions in their balance.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _loadPendingCounts(); // Refresh data
+                    },
+                    child: Text('OK'),
+                  ),
+                ],
+              );
+            },
+          );
+        }
+      } catch (e) {
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showDiagnosticDialog() async {
+    final TextEditingController userIdController = TextEditingController();
+    
+    final String? userId = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Diagnose Referral Issues'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Enter a user ID to diagnose referral issues:'),
+              SizedBox(height: 16),
+              TextField(
+                controller: userIdController,
+                decoration: InputDecoration(
+                  hintText: 'User ID',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(userIdController.text.trim()),
+              child: Text('Diagnose'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (userId != null && userId.isNotEmpty) {
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Running diagnostic...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      try {
+        final referralService = ReferralService();
+        await referralService.diagnoseReferralIssue(userId);
+        
+        Navigator.of(context).pop(); // Close loading dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Diagnostic completed! Check console logs for detailed results.'),
+            backgroundColor: AppTheme.successColor,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } catch (e) {
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error running diagnostic: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showCompleteReferralFix() async {
+    // First run comprehensive diagnosis
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Running Comprehensive Diagnosis'),
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 16),
+              Expanded(child: Text('Analyzing referral system...\nCheck console for detailed results.')),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      final referralService = ReferralService();
+      await referralService.comprehensiveDiagnosis();
+      
+      Navigator.of(context).pop(); // Close diagnosis loading dialog
+      
+      // Show confirmation dialog with detailed description
+      final bool? confirm = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.build_circle, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Complete Referral System Fix', style: TextStyle(color: Colors.red)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This comprehensive fix will:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 12),
+                Text('1. 🔧 Fix all recruiterId fields that have referral codes instead of Firebase UIDs'),
+                SizedBox(height: 8),
+                Text('2. 🔗 Fix all referral records to use proper user IDs'),
+                SizedBox(height: 8),
+                Text('3. 💰 Create missing balance entries for all approved referrals'),
+                SizedBox(height: 8),
+                Text('4. 📊 Update revenue tracking for all affected users'),
+                SizedBox(height: 16),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '⚠️ Important Notes:',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange[700]),
+                      ),
+                      SizedBox(height: 4),
+                      Text('• This operation processes ALL users and referrals', style: TextStyle(fontSize: 12)),
+                      Text('• Check console logs for diagnosis results', style: TextStyle(fontSize: 12)),
+                      Text('• Operation may take several minutes', style: TextStyle(fontSize: 12)),
+                      Text('• Backup recommended before proceeding', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'Continue with the complete fix?',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text('Fix Everything'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (confirm == true) {
+        // Show progress dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Fixing referral system...'),
+                  SizedBox(height: 8),
+                  Text(
+                    'This may take several minutes.\nPlease wait...',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+
+        try {
+          final result = await referralService.completeReferralSystemFix();
+          
+          Navigator.of(context).pop(); // Close progress dialog
+
+          // Show detailed results
+          showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                title: Text(
+                  result['success'] == true ? '✅ Fix Complete!' : '❌ Fix Failed',
+                  style: TextStyle(
+                    color: result['success'] == true ? AppTheme.successColor : AppTheme.errorColor,
+                  ),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (result['success'] == true) ...[
+                      Text('🔧 Fixed users: ${result['fixedUsers']}'),
+                      SizedBox(height: 8),
+                      Text('🔗 Fixed referral records: ${result['fixedReferrals']}'),
+                      SizedBox(height: 8),
+                      Text('💰 Created balance entries: ${result['createdBalanceEntries']}'),
+                      SizedBox(height: 8),
+                      Text('📊 Total balance added: ${result['totalBalanceAdded']?.toStringAsFixed(2)} LE'),
+                      SizedBox(height: 16),
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.successColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'All users should now see their referral commissions in their balance. The referral system is now consistent and working properly.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ] else ...[
+                      Text('Error: ${result['message']}'),
+                    ],
+                  ],
+                ),
+                actions: [
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      if (result['success'] == true) {
+                        _loadPendingCounts(); // Refresh data
+                      }
+                    },
+                    child: Text('OK'),
+                  ),
+                ],
+              );
+            },
+          );
+
+          // Show snackbar
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Operation completed'),
+              backgroundColor: result['success'] == true
+                  ? AppTheme.successColor 
+                  : AppTheme.errorColor,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        } catch (e) {
+          Navigator.of(context).pop(); // Close progress dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      Navigator.of(context).pop(); // Close diagnosis dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error running diagnosis: $e'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
   String _getAccountTypeDisplay(String? type, bool isArabic) {
     switch (type?.toLowerCase()) {
       case 'primary':
@@ -1047,19 +1484,22 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
     }
   }
 
-  // Approval Methods - Fixed
+  // Approval Methods - Updated for correct referral flow
   Future<void> _approveMembership(String userId, Map<String, dynamic> data, bool isArabic) async {
     try {
+      // Update user status to active
       await _firestore.collection('users').doc(userId).update({
         'status': 'active',
         'approvedAt': FieldValue.serverTimestamp(),
         'approvedBy': 'admin',
       });
 
-      // Check if this user was referred and process the referral if not already done
+      // Process referral reward if this user was referred
       final recruiterId = data['recruiterId'] as String?;
       if (recruiterId != null && recruiterId.isNotEmpty) {
-        print('User $userId was referred with code: $recruiterId. Processing referral...');
+        print('User $userId was referred with code: $recruiterId. Processing referral reward after approval...');
+        
+        final referralService = ReferralService();
         
         // Check if referral record already exists
         final existingReferrals = await _firestore
@@ -1068,22 +1508,22 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
             .get();
         
         if (existingReferrals.docs.isEmpty) {
-          // No referral record exists, create it now
+          // No referral record exists, create it first (this shouldn't happen in new flow)
           final tier = data['tier'] as String? ?? 'member';
-          final subscriptionFee = tier == 'client' ? 750.0 : 500.0;
+          final subscriptionFee = tier == 'client' ? 750.0 : 1500.0;
           
-          // Import and use ReferralService
-          final referralService = ReferralService();
           await referralService.processReferral(
             newUserId: userId,
-            referrerId: recruiterId, // Pass the referral code
+            referrerId: recruiterId,
             newUserTier: tier,
             subscriptionFee: subscriptionFee,
           );
-          print('Referral processed for newly approved user');
-        } else {
-          print('Referral record already exists for user $userId');
+          print('Created referral record for user $userId');
         }
+        
+        // Now trigger the referral reward after approval
+        await referralService.processReferralRewardAfterApproval(userId);
+        print('Processed referral reward after approval for user $userId');
       }
 
       ScaffoldMessenger.of(context).showSnackBar(

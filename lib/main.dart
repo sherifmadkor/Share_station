@@ -23,6 +23,7 @@ import 'presentation/screens/auth/register_screen.dart';
 import 'presentation/screens/user/user_dashboard.dart';
 import 'presentation/screens/user/browse_games_screen.dart';
 import 'presentation/screens/user/borrow_game_screen.dart';
+import 'presentation/screens/user/my_borrowings_screen.dart';
 import 'presentation/screens/user/my_contributions_screen.dart';
 import 'presentation/screens/user/add_contribution_screen.dart';
 import 'presentation/screens/user/profile_screen.dart';
@@ -46,6 +47,9 @@ import 'presentation/screens/admin/admin_dashboard.dart';
 // import 'presentation/screens/admin/admin_approval_dashboard.dart';
 import 'presentation/screens/admin/manage_games_screen.dart';
 import 'presentation/screens/admin/manage_users_screen.dart';
+import 'presentation/screens/admin/manage_return_requests_screen.dart';
+import 'presentation/screens/admin/admin_queue_management_screen.dart';
+import 'presentation/screens/admin/admin_account_queue_screen.dart';
 import 'presentation/screens/admin/analytics_screen.dart';
 import 'presentation/screens/admin/settings_screen.dart';
 import 'presentation/screens/admin/admin_referral_management.dart';
@@ -117,6 +121,17 @@ class ShareStationApp extends StatelessWidget {
                   GlobalCupertinoLocalizations.delegate,
                 ],
                 initialRoute: AppRoutes.splash,
+                onGenerateRoute: (settings) {
+                  switch (settings.name) {
+                    case '/admin/account-queue':
+                      final arguments = settings.arguments as Map<String, dynamic>? ?? {};
+                      return MaterialPageRoute(
+                        builder: (context) => AdminAccountQueueScreen(arguments: arguments),
+                      );
+                    default:
+                      return null;
+                  }
+                },
                 routes: {
                   // Authentication Routes
                   AppRoutes.splash: (context) => const SplashScreen(),
@@ -129,6 +144,7 @@ class ShareStationApp extends StatelessWidget {
                   // User Routes
                   AppRoutes.userDashboard: (context) => const UserDashboard(),
                   AppRoutes.browseGames: (context) => const BrowseGamesScreen(),
+                  AppRoutes.myBorrowings: (context) => const MyBorrowingsScreen(),
                   AppRoutes.myContributions: (context) => const MyContributionsScreen(),
                   AppRoutes.addContribution: (context) => const AddContributionScreen(),
                   AppRoutes.profileScreen: (context) => const EnhancedProfileScreen(),
@@ -154,6 +170,8 @@ class ShareStationApp extends StatelessWidget {
                   // AppRoutes.adminApproval: (context) => const AdminApprovalDashboard(),
                   AppRoutes.manageGames: (context) => const ManageGamesScreen(),
                   AppRoutes.manageUsers: (context) => const ManageUsersScreen(),
+                  AppRoutes.manageReturns: (context) => const ManageReturnRequestsScreen(),
+                  AppRoutes.adminQueueManagement: (context) => const AdminQueueManagementScreen(),
                   AppRoutes.adminAnalytics: (context) => const AnalyticsScreen(),
                   AppRoutes.adminSettings: (context) => const SettingsScreen(),
                   AppRoutes.adminReferralManagement: (context) => const AdminReferralManagement(),

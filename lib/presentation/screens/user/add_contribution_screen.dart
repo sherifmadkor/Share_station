@@ -15,6 +15,7 @@ import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/game_model.dart';
 import '../../../services/contribution_service.dart';
+import '../../../services/game_database_service.dart';
 
 class AddContributionScreen extends StatefulWidget {
   const AddContributionScreen({Key? key}) : super(key: key);
@@ -29,6 +30,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final ContributionService _contributionService = ContributionService();
+  final GameDatabaseService _gameDBService = GameDatabaseService();
 
   // --- Game Contribution Controllers ---
   final _gameTitleController = TextEditingController();
@@ -59,11 +61,11 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
   bool _isLoading = false;
 
-  // Game suggestions
+  // Game suggestions from database
   List<Map<String, dynamic>> _gameSuggestions = [];
   bool _showSuggestions = false;
-  String? _selectedExistingGameId;
-  Map<String, dynamic>? _selectedExistingGame;
+  Map<String, dynamic>? _selectedGame;
+  bool _isSearchingGames = false;
 
   // Available regions and editions
   final List<String> _availableRegions = [
@@ -82,9 +84,19 @@ class _AddContributionScreenState extends State<AddContributionScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadAvailableFundGames();
+    _initializeGameDatabase();
 
     // Listen to game title changes for suggestions
     _gameTitleController.addListener(_onGameTitleChanged);
+  }
+
+  // Initialize game database
+  Future<void> _initializeGameDatabase() async {
+    try {
+      await _gameDBService.seedGameDatabase();
+    } catch (e) {
+      print('Error initializing game database: $e');
+    }
   }
 
   @override
@@ -110,14 +122,82 @@ class _AddContributionScreenState extends State<AddContributionScreen>
       setState(() {
         _gameSuggestions = [];
         _showSuggestions = false;
+        _isSearchingGames = false;
       });
       return;
     }
 
     if (query.length < 2) return; // Don't search for very short queries
 
+    setState(() {
+      _isSearchingGames = true;
+    });
+
     try {
-      // Search for games that contain the query (case-insensitive)
+      // Search both existing games and comprehensive game database
+      final futures = await Future.wait([
+        _searchExistingGames(query),
+        _gameDBService.searchGames(query),
+      ]);
+      
+      final existingGames = futures[0] as List<Map<String, dynamic>>;
+      final databaseGames = futures[1] as List<Map<String, dynamic>>;
+      
+      // Combine results with existing games first
+      final allGames = <Map<String, dynamic>>[];
+      
+      // Add existing games first (marked as 'existing_game')
+      for (var game in existingGames) {
+        allGames.add({
+          'id': game['id'],
+          'title': game['title'],
+          'name': game['title'],
+          'coverImageUrl': game['coverImageUrl'],
+          'rating': null,
+          'platforms': game['platforms'] ?? [],
+          'genres': game['genres'] ?? [],
+          'released': null,
+          'source': 'existing_game',
+          'accountsCount': game['accountsCount'],
+          'gameValue': game['gameValue'],
+        });
+      }
+      
+      // Add database games (avoid duplicates by name)
+      final existingTitles = existingGames.map((g) => g['title'].toString().toLowerCase()).toSet();
+      for (var game in databaseGames) {
+        final gameName = game['name'].toString().toLowerCase();
+        if (!existingTitles.contains(gameName)) {
+          allGames.add({
+            'id': game['id'],
+            'title': game['name'],
+            'name': game['name'],
+            'coverImageUrl': game['background_image'],
+            'rating': game['rating'],
+            'platforms': game['platforms'],
+            'genres': game['genres'],
+            'released': game['released'],
+            'source': game['source'],
+          });
+        }
+      }
+      
+      setState(() {
+        _gameSuggestions = allGames;
+        _showSuggestions = _gameSuggestions.isNotEmpty;
+        _isSearchingGames = false;
+      });
+    } catch (e) {
+      print('Error searching games: $e');
+      setState(() {
+        _isSearchingGames = false;
+      });
+    }
+  }
+
+  // Search existing games in our system
+  Future<List<Map<String, dynamic>>> _searchExistingGames(String query) async {
+    try {
       final snapshot = await _firestore
           .collection('games')
           .where('title', isGreaterThanOrEqualTo: query)
@@ -125,28 +205,26 @@ class _AddContributionScreenState extends State<AddContributionScreen>
           .limit(5)
           .get();
 
-      setState(() {
-        _gameSuggestions = snapshot.docs.map((doc) => {
-          'id': doc.id,
-          'title': doc.data()['title'],
-          'coverImageUrl': doc.data()['coverImageUrl'],
-          'gameValue': doc.data()['gameValue'] ?? doc.data()['totalValue'],
-          'accountsCount': (doc.data()['accounts'] as List?)?.length ?? 0,
-        }).toList();
-        _showSuggestions = _gameSuggestions.isNotEmpty;
-      });
+      return snapshot.docs.map((doc) => {
+        'id': doc.id,
+        'title': doc.data()['title'],
+        'coverImageUrl': doc.data()['coverImageUrl'],
+        'gameValue': doc.data()['gameValue'] ?? doc.data()['totalValue'],
+        'accountsCount': (doc.data()['accounts'] as List?)?.length ?? 0,
+        'platforms': doc.data()['platforms'] ?? [],
+        'genres': doc.data()['genres'] ?? [],
+      }).toList();
     } catch (e) {
-      print('Error searching games: $e');
+      print('Error searching existing games: $e');
+      return [];
     }
   }
 
-  // Select an existing game from suggestions
-  void _selectExistingGame(Map<String, dynamic> game) {
+  // Select a game from database suggestions
+  void _selectGame(Map<String, dynamic> game) {
     setState(() {
-      _selectedExistingGameId = game['id'];
-      _selectedExistingGame = game;
-      _gameTitleController.text = game['title'];
-      _gameValueController.text = game['gameValue'].toString();
+      _selectedGame = game;
+      _gameTitleController.text = game['title'] ?? game['name'];
       _showSuggestions = false;
     });
 
@@ -154,11 +232,18 @@ class _AddContributionScreenState extends State<AddContributionScreen>
     final appProvider = Provider.of<AppProvider>(context, listen: false);
     final isArabic = appProvider.isArabic;
 
+    // Check if this is from existing games in our system or from the game database
+    final isExistingGame = game['source'] == 'existing_game';
+    
     Fluttertoast.showToast(
-      msg: isArabic
-          ? 'تم اختيار لعبة موجودة. سيتم إضافة حسابك إلى هذه اللعبة.'
-          : 'Existing game selected. Your account will be added to this game.',
-      backgroundColor: AppTheme.infoColor,
+      msg: isExistingGame
+          ? (isArabic
+              ? 'تم اختيار لعبة موجودة. سيتم إضافة حسابك إلى هذه اللعبة.'
+              : 'Existing game selected. Your account will be added to this game.')
+          : (isArabic
+              ? 'تم اختيار اللعبة من قاعدة البيانات. يجب اختيار لعبة للمتابعة.'
+              : 'Game selected from database. Game selection is required to continue.'),
+      backgroundColor: isExistingGame ? AppTheme.infoColor : AppTheme.successColor,
       toastLength: Toast.LENGTH_LONG,
     );
   }
@@ -256,8 +341,25 @@ class _AddContributionScreenState extends State<AddContributionScreen>
 
   // Submit game contribution using the contribution service
   Future<void> _submitGameContributionRequest() async {
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    final isArabic = appProvider.isArabic;
+
     if (_gameTitleController.text.isEmpty) {
-      Fluttertoast.showToast(msg: 'Please enter game title', backgroundColor: AppTheme.warningColor);
+      Fluttertoast.showToast(
+        msg: isArabic ? 'يرجى إدخال عنوان اللعبة' : 'Please enter game title', 
+        backgroundColor: AppTheme.warningColor,
+      );
+      return;
+    }
+
+    if (_selectedGame == null) {
+      Fluttertoast.showToast(
+        msg: isArabic 
+            ? 'يجب اختيار لعبة من القائمة. ابحث واختر اللعبة من النتائج.'
+            : 'Please select a game from the list. Search and select the game from results.',
+        backgroundColor: AppTheme.warningColor,
+        toastLength: Toast.LENGTH_LONG,
+      );
       return;
     }
 
@@ -317,16 +419,21 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         edition: _selectedEdition,
         region: _selectedRegion,
         description: _gameDescriptionController.text.trim().isEmpty ? null : _gameDescriptionController.text.trim(),
-        coverImageUrl: _selectedExistingGame?['coverImageUrl'],
-        existingGameId: _selectedExistingGameId, // Pass the existing game ID if selected
+        coverImageUrl: _selectedGame?['coverImageUrl'] ?? _selectedGame?['background_image'],
+        existingGameId: _selectedGame != null && _selectedGame!['source'] == 'existing_game' ? _selectedGame!['id'] : null,
         isFullAccount: _selectedAccountTypes.contains(AccountType.full), // Flag for full account
       );
 
       if (result['success']) {
+        final isExistingGame = _selectedGame?['source'] == 'existing_game';
         Fluttertoast.showToast(
-          msg: _selectedExistingGameId != null
-              ? 'Contribution request submitted! Your account will be added to the existing game after approval.'
-              : 'Game contribution request submitted! Awaiting admin approval.',
+          msg: isExistingGame
+              ? (isArabic
+                  ? 'تم إرسال طلب المساهمة! سيتم إضافة حسابك إلى اللعبة الموجودة بعد الموافقة.'
+                  : 'Contribution request submitted! Your account will be added to the existing game after approval.')
+              : (isArabic
+                  ? 'تم إرسال طلب مساهمة اللعبة! في انتظار موافقة الإدارة.'
+                  : 'Game contribution request submitted! Awaiting admin approval.'),
           backgroundColor: AppTheme.successColor,
           toastLength: Toast.LENGTH_LONG,
         );
@@ -334,11 +441,10 @@ class _AddContributionScreenState extends State<AddContributionScreen>
         _gameTitleController.clear();
         _gameDescriptionController.clear();
         _accountEmailController.clear();
+        _selectedGame = null;
         _accountPasswordController.clear();
         _gameValueController.text = '500';
         setState(() {
-          _selectedExistingGameId = null;
-          _selectedExistingGame = null;
           _selectedEdition = 'Standard';
           _selectedRegion = 'US';
         });
@@ -566,69 +672,120 @@ class _AddContributionScreenState extends State<AddContributionScreen>
           SizedBox(height: 16.h),
 
           // Game Title with autocomplete
-          Stack(
+          Column(
             children: [
               TextField(
                 controller: _gameTitleController,
                 decoration: InputDecoration(
                   labelText: isArabic ? 'اسم اللعبة' : 'Game Title',
-                  hintText: isArabic ? 'ابدأ الكتابة للبحث عن لعبة موجودة' : 'Start typing to search existing games',
+                  hintText: isArabic ? 'ابدأ الكتابة للبحث في قاعدة بيانات الألعاب' : 'Start typing to search game database',
                   prefixIcon: Icon(Icons.games, color: AppTheme.primaryColor),
-                  suffixIcon: _selectedExistingGameId != null
-                      ? Icon(Icons.check_circle, color: AppTheme.successColor)
-                      : null,
+                  suffixIcon: _isSearchingGames
+                      ? SizedBox(
+                          width: 20.w,
+                          height: 20.h,
+                          child: CircularProgressIndicator(strokeWidth: 2.w),
+                        )
+                      : _selectedGame != null
+                          ? Icon(Icons.check_circle, color: AppTheme.successColor)
+                          : null,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
                 ),
               ),
               if (_showSuggestions)
-                Positioned(
-                  top: 60.h,
-                  left: 0,
-                  right: 0,
-                  child: Material(
-                    elevation: 4,
+                Container(
+                  margin: EdgeInsets.only(top: 8.h),
+                  constraints: BoxConstraints(maxHeight: 200.h),
+                  decoration: BoxDecoration(
+                    color: isDarkMode ? AppTheme.darkSurface : Colors.white,
                     borderRadius: BorderRadius.circular(8.r),
-                    child: Container(
-                      constraints: BoxConstraints(maxHeight: 200.h),
-                      decoration: BoxDecoration(
-                        color: isDarkMode ? AppTheme.darkSurface : Colors.white,
-                        borderRadius: BorderRadius.circular(8.r),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
                       ),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _gameSuggestions.length,
-                        itemBuilder: (context, index) {
-                          final game = _gameSuggestions[index];
-                          return ListTile(
-                            leading: game['coverImageUrl'] != null
-                                ? ClipRRect(
-                              borderRadius: BorderRadius.circular(4.r),
-                              child: Image.network(
-                                game['coverImageUrl'],
-                                width: 40.w,
-                                height: 40.w,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Icon(FontAwesomeIcons.gamepad),
+                    ],
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _gameSuggestions.length,
+                    itemBuilder: (context, index) {
+                      final game = _gameSuggestions[index];
+                      final isExistingGame = game['source'] == 'existing_game';
+                      return ListTile(
+                        leading: (game['coverImageUrl'] ?? game['background_image']) != null
+                            ? ClipRRect(
+                          borderRadius: BorderRadius.circular(4.r),
+                          child: Image.network(
+                            game['coverImageUrl'] ?? game['background_image'],
+                            width: 40.w,
+                            height: 40.w,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Icon(FontAwesomeIcons.gamepad),
+                          ),
+                        )
+                            : Icon(FontAwesomeIcons.gamepad),
+                        title: Text(
+                          game['title'] ?? game['name'],
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (game['platforms']?.isNotEmpty == true)
+                              Text(
+                                (game['platforms'] as List).join(', '),
+                                style: TextStyle(fontSize: 12.sp, color: Colors.grey),
                               ),
-                            )
-                                : Icon(FontAwesomeIcons.gamepad),
-                            title: Text(game['title']),
-                            subtitle: Text('${game['accountsCount']} ${isArabic ? "حساب" : "accounts"}'),
-                            trailing: Chip(
-                              label: Text('${game['gameValue']} LE'),
-                              backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                            if (game['released'] != null)
+                              Text(
+                                'Released: ${game['released']}',
+                                style: TextStyle(fontSize: 11.sp, color: Colors.grey.shade600),
+                              ),
+                          ],
+                        ),
+                        trailing: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (game['rating'] != null)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.star, color: Colors.orange, size: 14.sp),
+                                  Text('${game['rating']}', style: TextStyle(fontSize: 12.sp)),
+                                ],
+                              ),
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                              decoration: BoxDecoration(
+                                color: isExistingGame 
+                                    ? AppTheme.infoColor.withOpacity(0.1)
+                                    : AppTheme.primaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4.r),
+                              ),
+                              child: Text(
+                                isExistingGame 
+                                    ? (isArabic ? 'موجودة' : 'Existing')
+                                    : (isArabic ? 'قاعدة بيانات' : 'Database'),
+                                style: TextStyle(
+                                  fontSize: 10.sp,
+                                  color: isExistingGame ? AppTheme.infoColor : AppTheme.primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
-                            onTap: () => _selectExistingGame(game),
-                          );
-                        },
-                      ),
-                    ),
+                          ],
+                        ),
+                        onTap: () => _selectGame(game),
+                      );
+                    },
                   ),
                 ),
             ],
           ),
 
-          if (_selectedExistingGameId != null) ...[
+          if (_selectedGame != null && _selectedGame!['source'] == 'existing_game') ...[
             SizedBox(height: 8.h),
             Container(
               padding: EdgeInsets.all(12.w),

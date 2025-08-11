@@ -1,4 +1,5 @@
 // lib/services/balance_service.dart
+// FIXED VERSION - Properly integrates referral earnings into balance
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
@@ -8,7 +9,94 @@ class BalanceService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final Uuid _uuid = Uuid();
 
-  // Add balance entry to user
+  // Initialize balance entries for users that don't have them
+  Future<void> initializeUserBalanceEntries(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+
+      final userData = userDoc.data()!;
+
+      // Check if balanceEntries already exists
+      if (userData['balanceEntries'] != null) return;
+
+      List<Map<String, dynamic>> balanceEntries = [];
+
+      // Create entries for existing balance fields
+      if ((userData['borrowValue'] ?? 0) > 0) {
+        balanceEntries.add({
+          'id': _uuid.v4(),
+          'type': 'borrowValue',
+          'amount': userData['borrowValue'],
+          'description': 'Borrow value balance',
+          'earnedDate': Timestamp.now(),
+          'expiryDate': Timestamp.fromDate(DateTime.now().add(Duration(days: 90))),
+          'isExpired': false,
+        });
+      }
+
+      if ((userData['sellValue'] ?? 0) > 0) {
+        balanceEntries.add({
+          'id': _uuid.v4(),
+          'type': 'sellValue',
+          'amount': userData['sellValue'],
+          'description': 'Sell value balance',
+          'earnedDate': Timestamp.now(),
+          'expiryDate': Timestamp.fromDate(DateTime.now().add(Duration(days: 90))),
+          'isExpired': false,
+        });
+      }
+
+      if ((userData['refunds'] ?? 0) > 0) {
+        balanceEntries.add({
+          'id': _uuid.v4(),
+          'type': 'refunds',
+          'amount': userData['refunds'],
+          'description': 'Refunds balance',
+          'earnedDate': Timestamp.now(),
+          'expiryDate': Timestamp.fromDate(DateTime.now().add(Duration(days: 90))),
+          'isExpired': false,
+        });
+      }
+
+      // IMPORTANT: Add referral earnings if exists
+      if ((userData['referralEarnings'] ?? 0) > 0) {
+        balanceEntries.add({
+          'id': _uuid.v4(),
+          'type': 'referralEarnings',
+          'amount': userData['referralEarnings'],
+          'description': 'Referral commission earnings',
+          'earnedDate': Timestamp.now(),
+          'expiryDate': Timestamp.fromDate(DateTime.now().add(Duration(days: 90))),
+          'isExpired': false,
+        });
+      }
+
+      if ((userData['cashIn'] ?? 0) > 0) {
+        balanceEntries.add({
+          'id': _uuid.v4(),
+          'type': 'cashIn',
+          'amount': userData['cashIn'],
+          'description': 'Cash in balance',
+          'earnedDate': Timestamp.now(),
+          'expiryDate': null, // Cash in never expires
+          'isExpired': false,
+        });
+      }
+
+      // Update user document with balance entries
+      await _firestore.collection('users').doc(userId).update({
+        'balanceEntries': balanceEntries,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      print('Initialized balance entries for user $userId with ${balanceEntries.length} entries');
+    } catch (e) {
+      print('Error initializing balance entries: $e');
+    }
+  }
+
+  // Add balance entry to user (FIXED to properly update balanceEntries)
   Future<Map<String, dynamic>> addBalanceEntry({
     required String userId,
     required String type,
@@ -18,15 +106,18 @@ class BalanceService {
     int expiryDays = 90,
   }) async {
     try {
+      // First ensure user has balanceEntries array
+      await initializeUserBalanceEntries(userId);
+
       final entry = {
         'id': _uuid.v4(),
         'type': type,
         'amount': amount,
         'description': description,
         'earnedDate': FieldValue.serverTimestamp(),
-        'expiryDate': expires 
-          ? Timestamp.fromDate(DateTime.now().add(Duration(days: expiryDays)))
-          : null,
+        'expiryDate': expires
+            ? Timestamp.fromDate(DateTime.now().add(Duration(days: expiryDays)))
+            : null,
         'isExpired': false,
       };
 
@@ -42,6 +133,8 @@ class BalanceService {
 
       await batch.commit();
 
+      print('Added balance entry for user $userId: $type = $amount');
+
       return {
         'success': true,
         'message': 'Balance entry added successfully',
@@ -52,6 +145,161 @@ class BalanceService {
       return {
         'success': false,
         'message': 'Failed to add balance entry: $e',
+      };
+    }
+  }
+
+  // Calculate total balance from all sources (FIXED VERSION)
+  Future<double> calculateUserTotalBalance(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (!userDoc.exists) return 0.0;
+
+      final userData = userDoc.data()!;
+
+      // Method 1: Calculate from balanceEntries if exists
+      if (userData['balanceEntries'] != null) {
+        double total = 0;
+        final entries = List<Map<String, dynamic>>.from(userData['balanceEntries']);
+
+        for (var entry in entries) {
+          if (entry['isExpired'] != true) {
+            final amount = entry['amount'];
+            if (amount != null) {
+              total += amount is int ? amount.toDouble() : amount;
+            }
+          }
+        }
+        return total;
+      }
+
+      // Method 2: Fallback to individual fields if no balanceEntries
+      double total = 0;
+
+      // Add all balance components including referralEarnings
+      total += (userData['borrowValue'] ?? 0).toDouble();
+      total += (userData['sellValue'] ?? 0).toDouble();
+      total += (userData['refunds'] ?? 0).toDouble();
+      total += (userData['referralEarnings'] ?? 0).toDouble(); // IMPORTANT: Include referral earnings
+      total += (userData['cashIn'] ?? 0).toDouble();
+
+      // Subtract used and expired balances
+      total -= (userData['usedBalance'] ?? 0).toDouble();
+      total -= (userData['expiredBalance'] ?? 0).toDouble();
+
+      return total;
+    } catch (e) {
+      print('Error calculating total balance: $e');
+      return 0.0;
+    }
+  }
+
+  // Fix missing referral earnings in balance entries
+  Future<Map<String, dynamic>> fixMissingReferralEarningsInBalance() async {
+    try {
+      print('=== FIXING MISSING REFERRAL EARNINGS IN BALANCE ===');
+
+      final usersSnapshot = await _firestore
+          .collection('users')
+          .where('referralEarnings', isGreaterThan: 0)
+          .get();
+
+      int fixedCount = 0;
+      double totalFixed = 0;
+
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+        final referralEarnings = (userData['referralEarnings'] ?? 0).toDouble();
+
+        if (referralEarnings <= 0) continue;
+
+        // Initialize balance entries if missing
+        if (userData['balanceEntries'] == null) {
+          await initializeUserBalanceEntries(userDoc.id);
+          fixedCount++;
+          totalFixed += referralEarnings;
+          continue;
+        }
+
+        // Check if referral earnings entry exists
+        final balanceEntries = List<Map<String, dynamic>>.from(userData['balanceEntries']);
+        bool hasReferralEntry = balanceEntries.any((entry) =>
+        entry['type'] == 'referralEarnings' &&
+            entry['isExpired'] != true
+        );
+
+        if (!hasReferralEntry && referralEarnings > 0) {
+          print('Adding missing referral earnings for user ${userDoc.id}: $referralEarnings LE');
+
+          // Add the missing referral earnings entry
+          final entry = {
+            'id': _uuid.v4(),
+            'type': 'referralEarnings',
+            'amount': referralEarnings,
+            'description': 'Referral commission earnings (fixed)',
+            'earnedDate': Timestamp.now(),
+            'expiryDate': Timestamp.fromDate(DateTime.now().add(Duration(days: 90))),
+            'isExpired': false,
+          };
+
+          await userDoc.reference.update({
+            'balanceEntries': FieldValue.arrayUnion([entry]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          fixedCount++;
+          totalFixed += referralEarnings;
+        }
+      }
+
+      print('Fixed $fixedCount users with total $totalFixed LE in referral earnings');
+
+      return {
+        'success': true,
+        'fixedCount': fixedCount,
+        'totalFixed': totalFixed,
+        'message': 'Fixed $fixedCount users with missing referral earnings totaling $totalFixed LE',
+      };
+    } catch (e) {
+      print('Error fixing referral earnings: $e');
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
+    }
+  }
+
+  // Initialize all users without balanceEntries
+  Future<Map<String, dynamic>> initializeAllUsersBalanceEntries() async {
+    try {
+      print('=== INITIALIZING BALANCE ENTRIES FOR ALL USERS ===');
+
+      final usersSnapshot = await _firestore.collection('users').get();
+      int initialized = 0;
+
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+
+        // Skip if already has balanceEntries
+        if (userData['balanceEntries'] != null) continue;
+
+        print('Initializing balance entries for user ${userDoc.id}');
+        await initializeUserBalanceEntries(userDoc.id);
+        initialized++;
+      }
+
+      print('Initialized balance entries for $initialized users');
+
+      return {
+        'success': true,
+        'initialized': initialized,
+        'message': 'Initialized balance entries for $initialized users',
+      };
+    } catch (e) {
+      print('Error initializing all users: $e');
+      return {
+        'success': false,
+        'message': 'Error: $e',
       };
     }
   }
@@ -69,15 +317,15 @@ class BalanceService {
 
       // Get all active users with balance entries
       final usersSnapshot = await _firestore
-        .collection('users')
-        .where('status', isEqualTo: 'active')
-        .get();
+          .collection('users')
+          .where('status', isEqualTo: 'active')
+          .get();
 
       for (var doc in usersSnapshot.docs) {
         checkedCount++;
         final userData = doc.data();
         final balanceEntries = List<Map<String, dynamic>>.from(
-          userData['balanceEntries'] ?? []
+            userData['balanceEntries'] ?? []
         );
 
         if (balanceEntries.isEmpty) continue;
@@ -97,7 +345,7 @@ class BalanceService {
             entry['isExpired'] = true;
             final amount = (entry['amount'] ?? 0).toDouble();
             final type = entry['type'] ?? 'unknown';
-            
+
             userExpiredAmount += amount;
             expiredByType[type] = (expiredByType[type] ?? 0) + amount;
             expiredCount++;
@@ -152,119 +400,39 @@ class BalanceService {
     }
   }
 
-  // Get balance statistics for admin dashboard
-  Future<Map<String, dynamic>> getBalanceStatistics() async {
-    try {
-      final usersSnapshot = await _firestore
-        .collection('users')
-        .where('status', isEqualTo: 'active')
-        .get();
-
-      int totalUsers = 0;
-      int usersWithBalance = 0;
-      int usersWithExpiringBalance = 0;
-      double totalActiveBalance = 0;
-      double totalExpiringBalance = 0;
-      double totalExpiredBalance = 0;
-
-      final now = DateTime.now();
-      final thirtyDaysFromNow = now.add(Duration(days: 30));
-
-      for (var doc in usersSnapshot.docs) {
-        totalUsers++;
-        final userData = doc.data();
-        final balanceEntries = List<Map<String, dynamic>>.from(
-          userData['balanceEntries'] ?? []
-        );
-
-        if (balanceEntries.isEmpty) continue;
-
-        double userActiveBalance = 0;
-        double userExpiringBalance = 0;
-        bool hasActiveBalance = false;
-        bool hasExpiringBalance = false;
-
-        for (var entry in balanceEntries) {
-          final isExpired = entry['isExpired'] == true;
-          final expiryDate = entry['expiryDate'] as Timestamp?;
-          final amount = (entry['amount'] ?? 0).toDouble();
-
-          if (isExpired) {
-            // Skip expired entries (already counted in expiredBalance field)
-            continue;
-          }
-
-          if (expiryDate == null || expiryDate.toDate().isAfter(now)) {
-            userActiveBalance += amount;
-            hasActiveBalance = true;
-
-            // Check if expiring within 30 days
-            if (expiryDate != null && 
-                expiryDate.toDate().isBefore(thirtyDaysFromNow) &&
-                expiryDate.toDate().isAfter(now)) {
-              userExpiringBalance += amount;
-              hasExpiringBalance = true;
-            }
-          }
-        }
-
-        if (hasActiveBalance) {
-          usersWithBalance++;
-          totalActiveBalance += userActiveBalance;
-        }
-
-        if (hasExpiringBalance) {
-          usersWithExpiringBalance++;
-          totalExpiringBalance += userExpiringBalance;
-        }
-
-        totalExpiredBalance += (userData['expiredBalance'] ?? 0).toDouble();
-      }
-
-      return {
-        'success': true,
-        'totalUsers': totalUsers,
-        'usersWithBalance': usersWithBalance,
-        'usersWithExpiringBalance': usersWithExpiringBalance,
-        'totalActiveBalance': totalActiveBalance,
-        'totalExpiringBalance': totalExpiringBalance,
-        'totalExpiredBalance': totalExpiredBalance,
-        'averageActiveBalance': usersWithBalance > 0 
-          ? totalActiveBalance / usersWithBalance 
-          : 0,
-      };
-    } catch (e) {
-      print('Error getting balance statistics: $e');
-      return {
-        'success': false,
-        'message': 'Failed to get balance statistics: $e',
-      };
-    }
-  }
-
-  // Get user's balance summary
+  // Get user's balance summary (FIXED to include referralEarnings)
   Future<Map<String, dynamic>> getUserBalanceSummary(String userId) async {
     try {
+      // First ensure user has balance entries
+      await initializeUserBalanceEntries(userId);
+
       final userDoc = await _firestore.collection('users').doc(userId).get();
-      
+
       if (!userDoc.exists) {
         return {'success': false, 'message': 'User not found'};
       }
 
       final userData = userDoc.data()!;
-      final userModel = UserModel.fromFirestore(userDoc);
+
+      // Calculate total balance properly
+      final totalBalance = await calculateUserTotalBalance(userId);
+
+      // Get balance breakdown
+      final balanceBreakdown = {
+        'borrowValue': (userData['borrowValue'] ?? 0).toDouble(),
+        'sellValue': (userData['sellValue'] ?? 0).toDouble(),
+        'refunds': (userData['refunds'] ?? 0).toDouble(),
+        'referralEarnings': (userData['referralEarnings'] ?? 0).toDouble(),
+        'cashIn': (userData['cashIn'] ?? 0).toDouble(),
+      };
 
       return {
         'success': true,
-        'activeBalance': userModel.activeBalance,
-        'totalBalance': userModel.totalBalance,
-        'expiredBalance': userModel.expiredBalance,
-        'amountExpiringWithin30Days': userModel.amountExpiringWithin30Days,
-        'hasExpiringBalance': userModel.hasExpiringBalance,
-        'balanceBreakdown': userModel.balanceBreakdown,
-        'activeEntries': userModel.activeBalanceEntries.length,
-        'expiringEntries': userModel.expiringBalanceEntries.length,
-        'expiredEntries': userModel.expiredBalanceEntries.length,
+        'totalBalance': totalBalance,
+        'activeBalance': totalBalance,
+        'expiredBalance': (userData['expiredBalance'] ?? 0).toDouble(),
+        'balanceBreakdown': balanceBreakdown,
+        'hasReferralEarnings': balanceBreakdown['referralEarnings']! > 0,
       };
     } catch (e) {
       print('Error getting user balance summary: $e');
@@ -272,132 +440,6 @@ class BalanceService {
         'success': false,
         'message': 'Failed to get user balance summary: $e',
       };
-    }
-  }
-
-  // Manually expire specific balance entries (admin function)
-  Future<Map<String, dynamic>> expireBalanceEntry({
-    required String userId,
-    required String entryId,
-    String reason = 'Manual expiry by admin',
-  }) async {
-    try {
-      final userRef = _firestore.collection('users').doc(userId);
-      final userDoc = await userRef.get();
-
-      if (!userDoc.exists) {
-        return {'success': false, 'message': 'User not found'};
-      }
-
-      final userData = userDoc.data()!;
-      final balanceEntries = List<Map<String, dynamic>>.from(
-        userData['balanceEntries'] ?? []
-      );
-
-      // Find and expire the specific entry
-      bool entryFound = false;
-      double expiredAmount = 0;
-      String expiredType = '';
-
-      final updatedEntries = balanceEntries.map((entry) {
-        if (entry['id'] == entryId && entry['isExpired'] != true) {
-          entry['isExpired'] = true;
-          entry['expiredReason'] = reason;
-          entry['expiredDate'] = Timestamp.fromDate(DateTime.now());
-          expiredAmount = (entry['amount'] ?? 0).toDouble();
-          expiredType = entry['type'] ?? '';
-          entryFound = true;
-        }
-        return entry;
-      }).toList();
-
-      if (!entryFound) {
-        return {'success': false, 'message': 'Balance entry not found or already expired'};
-      }
-
-      // Update user document
-      await userRef.update({
-        'balanceEntries': updatedEntries,
-        'expiredBalance': FieldValue.increment(expiredAmount),
-        expiredType: FieldValue.increment(-expiredAmount),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      return {
-        'success': true,
-        'message': 'Balance entry expired successfully',
-        'expiredAmount': expiredAmount,
-        'expiredType': expiredType,
-      };
-    } catch (e) {
-      print('Error expiring balance entry: $e');
-      return {
-        'success': false,
-        'message': 'Failed to expire balance entry: $e',
-      };
-    }
-  }
-
-  // Get users with expiring balance (for notifications)
-  Future<List<Map<String, dynamic>>> getUsersWithExpiringBalance({
-    int days = 30,
-    int limit = 100,
-  }) async {
-    try {
-      final usersSnapshot = await _firestore
-        .collection('users')
-        .where('status', isEqualTo: 'active')
-        .limit(limit)
-        .get();
-
-      List<Map<String, dynamic>> usersWithExpiringBalance = [];
-      final now = DateTime.now();
-      final targetDate = now.add(Duration(days: days));
-
-      for (var doc in usersSnapshot.docs) {
-        final userData = doc.data();
-        final balanceEntries = List<Map<String, dynamic>>.from(
-          userData['balanceEntries'] ?? []
-        );
-
-        double expiringAmount = 0;
-        List<Map<String, dynamic>> expiringEntries = [];
-
-        for (var entry in balanceEntries) {
-          if (entry['isExpired'] == true) continue;
-
-          final expiryDate = entry['expiryDate'] as Timestamp?;
-          if (expiryDate != null && 
-              expiryDate.toDate().isBefore(targetDate) &&
-              expiryDate.toDate().isAfter(now)) {
-            expiringAmount += (entry['amount'] ?? 0).toDouble();
-            expiringEntries.add({
-              'id': entry['id'],
-              'type': entry['type'],
-              'amount': entry['amount'],
-              'description': entry['description'],
-              'expiryDate': expiryDate,
-              'daysUntilExpiry': expiryDate.toDate().difference(now).inDays,
-            });
-          }
-        }
-
-        if (expiringAmount > 0) {
-          usersWithExpiringBalance.add({
-            'userId': doc.id,
-            'userName': userData['name'],
-            'email': userData['email'],
-            'memberId': userData['memberId'],
-            'expiringAmount': expiringAmount,
-            'expiringEntries': expiringEntries,
-          });
-        }
-      }
-
-      return usersWithExpiringBalance;
-    } catch (e) {
-      print('Error getting users with expiring balance: $e');
-      return [];
     }
   }
 }

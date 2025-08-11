@@ -398,21 +398,20 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
 
   Widget _buildEarningsTab(bool isArabic, bool isDarkMode, dynamic user) {
     final referralHistory = _referralStats['referralHistory'] as List? ?? [];
-    final earningsHistory = referralHistory.where((r) => r['status'] == 'paid').toList();
-
+    
     return RefreshIndicator(
       onRefresh: _loadReferralData,
-      child: earningsHistory.isEmpty
+      child: referralHistory.isEmpty
           ? _buildEmptyState(
               isArabic ? 'لا توجد أرباح بعد' : 'No Earnings Yet',
-              isArabic ? 'ستظهر أرباحك هنا بعد 90 يوماً' : 'Your earnings will appear here after 90 days',
+              isArabic ? 'ستظهر أرباحك هنا عند إحالة أعضاء جدد' : 'Your earnings will appear here when you refer new members',
               FontAwesomeIcons.chartLine,
             )
           : ListView.builder(
               padding: EdgeInsets.all(16.w),
-              itemCount: earningsHistory.length,
+              itemCount: referralHistory.length,
               itemBuilder: (context, index) {
-                final earning = earningsHistory[index];
+                final earning = referralHistory[index];
                 return _buildEarningItem(earning, isArabic, isDarkMode);
               },
             ),
@@ -494,12 +493,12 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
           Container(
             padding: EdgeInsets.all(12.w),
             decoration: BoxDecoration(
-              color: _getStatusColor(referralStatus).withOpacity(0.1),
+              color: _getPaymentStatusColor(paymentStatus).withOpacity(0.1),
               borderRadius: BorderRadius.circular(8.r),
             ),
             child: Icon(
-              FontAwesomeIcons.userCheck, // Use userCheck to show approved referral
-              color: _getStatusColor(referralStatus),
+              paymentStatus == 'paid' ? FontAwesomeIcons.checkCircle : FontAwesomeIcons.clock,
+              color: _getPaymentStatusColor(paymentStatus),
               size: 20.sp,
             ),
           ),
@@ -532,24 +531,19 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
                     color: isDarkMode ? Colors.white70 : Colors.black54,
                   ),
                 ),
-                SizedBox(height: 4.h),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
-                  decoration: BoxDecoration(
-                    color: _getPaymentStatusColor(paymentStatus),
-                    borderRadius: BorderRadius.circular(12.r),
-                  ),
-                  child: Text(
-                    isArabic
-                        ? (paymentStatus == 'paid' ? 'مدفوع' : 'معلق الدفع')
-                        : (paymentStatus == 'paid' ? 'PAID' : 'PAYMENT PENDING'),
+                if (date != null) ...[
+                  SizedBox(height: 2.h),
+                  Text(
+                    _calculateRemainingDays(date.toDate(), isArabic),
                     style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 9.sp,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 12.sp,
+                      color: _getRemainingDaysColor(date.toDate()),
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                ),
+                ],
+                SizedBox(height: 4.h),
+                _buildReferralStatusIndicator(referral, isArabic),
               ],
             ),
           ),
@@ -570,6 +564,43 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
     final revenue = earning['revenue'] ?? 0.0;
     final date = earning['referralDate'] as Timestamp?;
     final borrowCommissions = earning['borrowCommissions'] as List? ?? [];
+    final memberName = earning['memberName'] ?? 'Unknown Member';
+    final status = earning['status'] ?? 'pending';
+    final tier = earning['tier'] ?? 'member';
+    
+    // Calculate payment status
+    bool isPaid = status == 'paid';
+    bool isExpired = false;
+    int? daysUntilPayment;
+    String paymentStatus = '';
+    Color statusColor = Colors.grey;
+    
+    if (date != null) {
+      final referralDate = date.toDate();
+      final expiryDate = referralDate.add(Duration(days: 90));
+      final now = DateTime.now();
+      
+      if (isPaid) {
+        paymentStatus = isArabic ? 'تم الدفع' : 'Paid';
+        statusColor = Colors.green;
+      } else if (now.isAfter(expiryDate)) {
+        isExpired = true;
+        paymentStatus = isArabic ? 'منتهي' : 'Expired';
+        statusColor = Colors.red;
+      } else {
+        daysUntilPayment = expiryDate.difference(now).inDays;
+        paymentStatus = isArabic 
+            ? 'ينتهي صلاحيته بعد $daysUntilPayment يوم'
+            : 'Expires in $daysUntilPayment days';
+        statusColor = daysUntilPayment <= 30 ? Colors.orange : Colors.blue;
+      }
+    }
+
+    // Calculate total earnings (base + borrow commissions)
+    double totalRevenue = revenue;
+    for (var commission in borrowCommissions) {
+      totalRevenue += (commission['amount'] ?? 0.0);
+    }
 
     return Container(
       margin: EdgeInsets.only(bottom: 12.h),
@@ -577,6 +608,11 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
       decoration: BoxDecoration(
         color: isDarkMode ? AppTheme.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(12.r),
+        border: isPaid 
+            ? Border.all(color: Colors.green.withOpacity(0.3), width: 1)
+            : isExpired
+                ? Border.all(color: Colors.red.withOpacity(0.3), width: 1)
+                : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -591,43 +627,138 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                isArabic ? 'عمولة إحالة' : 'Referral Commission',
-                style: TextStyle(
-                  fontSize: 16.sp,
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          isPaid 
+                              ? Icons.check_circle
+                              : isExpired 
+                                  ? Icons.cancel
+                                  : Icons.schedule,
+                          color: statusColor,
+                          size: 16.sp,
+                        ),
+                        SizedBox(width: 6.w),
+                        Text(
+                          isArabic ? 'عمولة إحالة' : 'Referral Commission',
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            fontWeight: FontWeight.w600,
+                            color: isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 6.h),
+                    Text(
+                      memberName,
+                      style: TextStyle(
+                        fontSize: 16.sp,
+                        fontWeight: FontWeight.bold,
+                        decoration: isExpired ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                    SizedBox(height: 2.h),
+                    Text(
+                      '${tier.toUpperCase()} ${isArabic ? "عضو" : "Member"}',
+                      style: TextStyle(
+                        fontSize: 11.sp,
+                        color: isDarkMode ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                '+${revenue.toStringAsFixed(0)} LE',
-                style: TextStyle(
-                  fontSize: 16.sp,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.successColor,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '+${totalRevenue.toStringAsFixed(0)} LE',
+                    style: TextStyle(
+                      fontSize: 18.sp,
+                      fontWeight: FontWeight.bold,
+                      color: isExpired ? Colors.grey : statusColor,
+                      decoration: isExpired ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  if (borrowCommissions.isNotEmpty)
+                    Text(
+                      isArabic 
+                          ? '(يتضمن ${borrowCommissions.length} عمولة استعارة)'
+                          : '(incl. ${borrowCommissions.length} borrow fees)',
+                      style: TextStyle(
+                        fontSize: 9.sp,
+                        color: Colors.grey,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          SizedBox(height: 12.h),
+          Divider(height: 1, color: Colors.grey.withOpacity(0.2)),
+          SizedBox(height: 8.h),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 12.sp, color: Colors.grey),
+                  SizedBox(width: 4.w),
+                  Text(
+                    date != null ? _formatDate(date.toDate(), isArabic) : 'N/A',
+                    style: TextStyle(
+                      fontSize: 12.sp,
+                      color: isDarkMode ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12.r),
+                  border: Border.all(
+                    color: statusColor.withOpacity(0.5),
+                    width: 0.5,
+                  ),
+                ),
+                child: Text(
+                  paymentStatus,
+                  style: TextStyle(
+                    fontSize: 11.sp,
+                    fontWeight: FontWeight.bold,
+                    color: statusColor,
+                  ),
                 ),
               ),
             ],
           ),
-          SizedBox(height: 8.h),
-          Text(
-            date != null ? _formatDate(date.toDate(), isArabic) : 'N/A',
-            style: TextStyle(
-              fontSize: 14.sp,
-              color: isDarkMode ? Colors.white70 : Colors.black54,
-            ),
-          ),
           if (borrowCommissions.isNotEmpty) ...[
             SizedBox(height: 8.h),
             Text(
-              isArabic 
-                  ? '+ ${borrowCommissions.length} عمولات استعارة'
-                  : '+ ${borrowCommissions.length} borrow commissions',
+              isArabic ? 'عمولات الاستعارة:' : 'Borrow Commissions:',
               style: TextStyle(
-                fontSize: 12.sp,
+                fontSize: 11.sp,
+                fontWeight: FontWeight.w600,
                 color: AppTheme.infoColor,
-                fontWeight: FontWeight.w500,
               ),
             ),
+            ...borrowCommissions.map((commission) => Padding(
+              padding: EdgeInsets.only(top: 4.h, left: 12.w),
+              child: Text(
+                '• +${(commission['amount'] ?? 0).toStringAsFixed(0)} LE (${isArabic ? "رسوم استعارة" : "borrow fee"})',
+                style: TextStyle(
+                  fontSize: 10.sp,
+                  color: Colors.grey,
+                ),
+              ),
+            )).toList(),
           ],
         ],
       ),
@@ -874,6 +1005,71 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
     }
   }
 
+  Widget _buildReferralStatusIndicator(Map<String, dynamic> referral, bool isArabic) {
+    final memberStatus = referral['memberStatus'] ?? 'pending';
+    final paymentStatus = referral['status'] ?? 'pending';
+    
+    Color color;
+    String label;
+    IconData icon;
+    
+    // Determine status based on member approval and payment
+    if (memberStatus == 'pending') {
+      color = AppTheme.warningColor;
+      label = isArabic ? 'في انتظار الموافقة' : 'Pending Approval';
+      icon = Icons.schedule;
+    } else if (memberStatus == 'active' && paymentStatus == 'paid') {
+      color = AppTheme.successColor;
+      label = isArabic ? 'تم الدفع' : 'Approved & Paid';
+      icon = Icons.check_circle;
+    } else if (memberStatus == 'active' && paymentStatus == 'pending') {
+      color = AppTheme.infoColor;
+      label = isArabic ? 'معتمد - في انتظار الدفع' : 'Approved - Payment Pending';
+      icon = Icons.pending;
+    } else if (memberStatus == 'rejected') {
+      color = AppTheme.errorColor;
+      label = isArabic ? 'مرفوض' : 'Rejected';
+      icon = Icons.cancel;
+    } else {
+      color = Colors.grey;
+      label = isArabic ? 'غير معروف' : 'Unknown';
+      icon = Icons.help_outline;
+    }
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(4.r),
+            border: Border.all(color: color),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: color,
+                size: 12.sp,
+              ),
+              SizedBox(width: 4.w),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10.sp,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Color _getStatusColor(String status) {
     switch (status) {
       case 'approved':
@@ -901,5 +1097,35 @@ class _EnhancedReferralDashboardState extends State<EnhancedReferralDashboard>
   String _formatDate(DateTime date, bool isArabic) {
     final formatter = DateFormat('MMM dd, yyyy');
     return formatter.format(date);
+  }
+
+  String _calculateRemainingDays(DateTime referralDate, bool isArabic) {
+    final now = DateTime.now();
+    final expiryDate = referralDate.add(Duration(days: 90));
+    final remainingDays = expiryDate.difference(now).inDays;
+
+    if (remainingDays <= 0) {
+      return isArabic ? 'انتهت صلاحية الإحالة' : 'Referral expired';
+    } else if (remainingDays == 1) {
+      return isArabic ? 'يوم واحد متبقي' : '1 day remaining';
+    } else {
+      return isArabic ? '$remainingDays يوم متبقي' : '$remainingDays days remaining';
+    }
+  }
+
+  Color _getRemainingDaysColor(DateTime referralDate) {
+    final now = DateTime.now();
+    final expiryDate = referralDate.add(Duration(days: 90));
+    final remainingDays = expiryDate.difference(now).inDays;
+
+    if (remainingDays <= 0) {
+      return AppTheme.errorColor; // Expired
+    } else if (remainingDays <= 7) {
+      return AppTheme.warningColor; // Expiring soon (7 days or less)
+    } else if (remainingDays <= 30) {
+      return Colors.orange; // Expiring within a month
+    } else {
+      return AppTheme.successColor; // Still has plenty of time
+    }
   }
 }

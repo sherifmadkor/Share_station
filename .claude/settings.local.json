@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(touch:*)",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "Bash(flutter build:*)"
     ],
     "deny": []
   }

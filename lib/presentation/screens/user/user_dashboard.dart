@@ -6,7 +6,6 @@ import 'package:google_nav_bar/google_nav_bar.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../providers/app_provider.dart';
@@ -15,15 +14,6 @@ import '../../../routes/app_routes.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 
 // Import screens
-import '../user/points_redemption_screen.dart';
-import '../user/my_contributions_screen.dart';
-import '../user/add_contribution_screen.dart';
-import '../user/balance_details_screen.dart';
-import '../user/queue_management_screen.dart';
-import '../user/sell_game_screen.dart';
-import '../user/referral_dashboard_screen.dart';
-import '../user/leaderboard_screen.dart';
-import '../user/net_metrics_dashboard_screen.dart';
 import '../user/browse_games_screen.dart';
 import '../user/my_borrowings_screen.dart';
 import '../user/profile_screen.dart';
@@ -115,7 +105,6 @@ class _UserDashboardState extends State<UserDashboard> {
           _totalShares = (userData['totalShares'] ?? 0).toDouble();
           _referralEarnings = (userData['referralEarnings'] ?? 0).toDouble();
           _totalReferrals = (userData['totalReferrals'] ?? 0).toInt();
-          _totalBorrows = (userData['totalBorrowsCount'] ?? 0).toInt();
           _stationLimit = (userData['stationLimit'] ?? 0).toDouble();
           _remainingStationLimit = (userData['remainingStationLimit'] ?? _stationLimit).toDouble();
           _tier = userData['tier'] ?? 'member';
@@ -126,14 +115,34 @@ class _UserDashboardState extends State<UserDashboard> {
         // Check for new referrals (referrals made in the last 24 hours)
         await _checkNewReferrals(currentUser.uid);
 
-        // Load active borrows
-        final borrowsQuery = await _firestore
+        // FIXED: Load active borrows (approved only) - using correct field name
+        final activeBorrowsQuery = await _firestore
             .collection('borrow_requests')
-            .where('borrowerId', isEqualTo: currentUser.uid)
+            .where('userId', isEqualTo: currentUser.uid)  // Changed from 'borrowerId'
             .where('status', isEqualTo: 'approved')
             .get();
 
-        _activeBorrows = borrowsQuery.docs.length;
+        // Load pending borrows
+        final pendingBorrowsQuery = await _firestore
+            .collection('borrow_requests')
+            .where('userId', isEqualTo: currentUser.uid)  // Changed from 'borrowerId'
+            .where('status', whereIn: ['pending', 'queued'])
+            .get();
+
+        // Load returned/completed borrows (history)
+        final historyBorrowsQuery = await _firestore
+            .collection('borrow_requests')
+            .where('userId', isEqualTo: currentUser.uid)  // Changed from 'borrowerId'
+            .where('status', isEqualTo: 'returned')
+            .get();
+
+        // Calculate counts
+        _activeBorrows = activeBorrowsQuery.docs.length;
+        final pendingBorrows = pendingBorrowsQuery.docs.length;
+        final historyBorrows = historyBorrowsQuery.docs.length;
+        
+        // Total borrows = active + pending + history
+        _totalBorrows = _activeBorrows + pendingBorrows + historyBorrows;
 
         // Load queue positions
         final queuesQuery = await _firestore
@@ -152,29 +161,74 @@ class _UserDashboardState extends State<UserDashboard> {
 
   double _calculateTotalBalance(Map<String, dynamic> userData) {
     double total = 0;
-    final entries = userData['balanceEntries'] as List<dynamic>? ?? [];
-
-    for (var entry in entries) {
-      if (entry['isExpired'] != true) {
-        final amount = entry['amount'];
-        if (amount != null) {
-          total += amount is int ? amount.toDouble() : amount;
+    
+    // Method 1: Try to calculate from balanceEntries if it exists
+    final entries = userData['balanceEntries'] as List<dynamic>?;
+    
+    if (entries != null && entries.isNotEmpty) {
+      // Use balance entries for accurate calculation
+      for (var entry in entries) {
+        if (entry['isExpired'] != true) {
+          final amount = entry['amount'];
+          if (amount != null) {
+            total += amount is int ? amount.toDouble() : amount;
+          }
         }
       }
+      
+      // Special handling for cashIn as it never expires
+      final cashIn = userData['cashIn'];
+      if (cashIn != null && cashIn > 0) {
+        // Check if cashIn is already in entries
+        bool hasCashInEntry = entries.any((e) => e['type'] == 'cashIn');
+        if (!hasCashInEntry) {
+          total += cashIn is int ? cashIn.toDouble() : cashIn;
+        }
+      }
+    } else {
+      // Method 2: Fallback to summing individual fields if no balanceEntries
+      // This ensures the balance is calculated even for users without the balanceEntries array
+      
+      // Add all balance components
+      final borrowValue = userData['borrowValue'];
+      if (borrowValue != null) {
+        total += borrowValue is int ? borrowValue.toDouble() : borrowValue;
+      }
+      
+      final sellValue = userData['sellValue'];
+      if (sellValue != null) {
+        total += sellValue is int ? sellValue.toDouble() : sellValue;
+      }
+      
+      final refunds = userData['refunds'];
+      if (refunds != null) {
+        total += refunds is int ? refunds.toDouble() : refunds;
+      }
+      
+      // IMPORTANT: Add referral earnings to balance
+      final referralEarnings = userData['referralEarnings'];
+      if (referralEarnings != null) {
+        total += referralEarnings is int ? referralEarnings.toDouble() : referralEarnings;
+      }
+      
+      final cashIn = userData['cashIn'];
+      if (cashIn != null) {
+        total += cashIn is int ? cashIn.toDouble() : cashIn;
+      }
+      
+      // Subtract used and expired balances
+      final usedBalance = userData['usedBalance'];
+      if (usedBalance != null) {
+        total -= usedBalance is int ? usedBalance.toDouble() : usedBalance;
+      }
+      
+      final expiredBalance = userData['expiredBalance'];
+      if (expiredBalance != null) {
+        total -= expiredBalance is int ? expiredBalance.toDouble() : expiredBalance;
+      }
     }
-
-    final cashIn = userData['cashIn'];
-    if (cashIn != null) {
-      total += cashIn is int ? cashIn.toDouble() : cashIn;
-    }
-
-    // Add referral earnings to balance
-    final referralEarnings = userData['referralEarnings'];
-    if (referralEarnings != null) {
-      total += referralEarnings is int ? referralEarnings.toDouble() : referralEarnings;
-    }
-
-    return total;
+    
+    return total.clamp(0.0, double.infinity); // Ensure non-negative
   }
 
   Future<void> _logout() async {
@@ -901,15 +955,15 @@ class _UserDashboardState extends State<UserDashboard> {
                 InkWell(
                   onTap: () {
                     // Navigate to My Borrowings
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('My Borrowings - Coming Soon')),
-                    );
+                    Navigator.pushNamed(context, AppRoutes.myBorrowings);
                   },
                   borderRadius: BorderRadius.circular(12.r),
                   child: _buildStatCard(
                     title: isArabic ? 'الاستعارات' : 'Borrows',
-                    value: _activeBorrows.toString(),
-                    subtitle: '$_totalBorrows ${isArabic ? "إجمالي" : "total"}',
+                    value: _activeBorrows.toString(),  // Shows active borrows count
+                    subtitle: isArabic 
+                        ? 'من أصل $_totalBorrows إجمالي'  // "out of X total" in Arabic
+                        : '$_totalBorrows total',  // Shows total of all statuses
                     icon: FontAwesomeIcons.handHolding,
                     color: AppTheme.warningColor,
                     isDarkMode: isDarkMode,

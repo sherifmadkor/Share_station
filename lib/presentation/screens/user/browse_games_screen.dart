@@ -13,6 +13,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/models/game_model.dart' as game_models;
 import '../../../data/models/user_model.dart' hide Platform;
 import '../../widgets/custom_loading.dart';
+import '../../../services/queue_service.dart';
+import '../../widgets/game/enhanced_game_details_modal.dart';
 import 'borrow_game_screen.dart';
 
 class BrowseGamesScreen extends StatefulWidget {
@@ -24,6 +26,7 @@ class BrowseGamesScreen extends StatefulWidget {
 
 class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final QueueService _queueService = QueueService();
 
   // Filters
   game_models.Platform _selectedPlatform = game_models.Platform.na;
@@ -169,6 +172,73 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
     }
 
     return total;
+  }
+
+  // Get game availability info including queue data
+  Future<Map<String, dynamic>> _getGameAvailabilityInfo(game_models.GameAccount game) async {
+    Map<String, dynamic> availabilityInfo = {
+      'totalSlots': 0,
+      'availableSlots': 0,
+      'borrowedSlots': 0,
+      'totalInQueue': 0,
+      'nextReturnDate': null,
+      'estimatedWaitDays': 0,
+    };
+
+    try {
+      int totalInQueue = 0;
+      DateTime? earliestReturn;
+      
+      if (game.accounts != null && game.accounts!.isNotEmpty) {
+        for (var account in game.accounts!) {
+          final slots = account['slots'] as Map<String, dynamic>?;
+          if (slots != null) {
+            for (var entry in slots.entries) {
+              availabilityInfo['totalSlots'] = (availabilityInfo['totalSlots'] as int) + 1;
+              
+              final slotData = entry.value as Map<String, dynamic>;
+              if (slotData['status'] == 'available') {
+                availabilityInfo['availableSlots'] = (availabilityInfo['availableSlots'] as int) + 1;
+              } else if (slotData['status'] == 'taken') {
+                availabilityInfo['borrowedSlots'] = (availabilityInfo['borrowedSlots'] as int) + 1;
+                
+                // Get return date for this slot
+                if (slotData['expectedReturnDate'] != null) {
+                  final returnDate = (slotData['expectedReturnDate'] as Timestamp).toDate();
+                  if (earliestReturn == null || returnDate.isBefore(earliestReturn)) {
+                    earliestReturn = returnDate;
+                  }
+                }
+              }
+              
+              // Get queue info for this slot
+              final queueInfo = await _queueService.getSlotQueueInfo(
+                gameId: game.accountId,
+                accountId: account['accountId'] ?? '',
+                platform: entry.key.split('_')[0],
+                accountType: entry.key.split('_').skip(1).join('_'),
+              );
+              
+              totalInQueue += (queueInfo['queueCount'] as int? ?? 0);
+            }
+          }
+        }
+      }
+      
+      availabilityInfo['totalInQueue'] = totalInQueue;
+      availabilityInfo['nextReturnDate'] = earliestReturn;
+      
+      if (earliestReturn != null) {
+        availabilityInfo['estimatedWaitDays'] = earliestReturn.difference(DateTime.now()).inDays;
+      } else if (totalInQueue > 0) {
+        availabilityInfo['estimatedWaitDays'] = totalInQueue * 30;
+      }
+      
+      return availabilityInfo;
+    } catch (e) {
+      print('Error getting game availability info: $e');
+      return availabilityInfo;
+    }
   }
 
   @override
@@ -515,13 +585,27 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
 
     final availableSlots = _getAvailableSlots(game);
     final totalSlots = _getTotalSlots(game);
-    final isAvailable = availableSlots > 0;
     final categoryColor = _getCategoryColor(game.lenderTier);
 
-    return InkWell(
-      onTap: () => _showGameDetails(game),
-      borderRadius: BorderRadius.circular(16.r),
-      child: Container(
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _getGameAvailabilityInfo(game),
+      builder: (context, snapshot) {
+        final info = snapshot.data ?? {
+          'totalSlots': totalSlots,
+          'availableSlots': availableSlots,
+          'borrowedSlots': 0,
+          'totalInQueue': 0,
+          'nextReturnDate': null,
+          'estimatedWaitDays': 0,
+        };
+        
+        final isFullyBorrowed = info['availableSlots'] == 0;
+        final hasQueue = info['totalInQueue'] > 0;
+
+        return InkWell(
+          onTap: () => _showEnhancedGameDetails(game, info),
+          borderRadius: BorderRadius.circular(16.r),
+          child: Container(
         decoration: BoxDecoration(
           color: isDarkMode ? AppTheme.darkSurface : Colors.white,
           borderRadius: BorderRadius.circular(16.r),
@@ -616,47 +700,113 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
                     ),
                   ),
                 ),
-                // Availability Badge
-                Positioned(
-                  bottom: 8.h,
-                  left: isArabic ? null : 8.w,
-                  right: isArabic ? 8.w : null,
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
-                    decoration: BoxDecoration(
-                      color: isAvailable
-                          ? AppTheme.successColor.withAlpha(242)
-                          : AppTheme.errorColor.withAlpha(242),
-                      borderRadius: BorderRadius.circular(6.r),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withAlpha(51),
-                          blurRadius: 4,
-                          offset: Offset(0, 2),
+                // Queue Status Overlay
+                if (isFullyBorrowed)
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: EdgeInsets.all(8.w),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.8),
+                            Colors.black.withOpacity(0.4),
+                            Colors.transparent,
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isAvailable ? Icons.check_circle : Icons.cancel,
-                          size: 12.sp,
-                          color: Colors.white,
-                        ),
-                        SizedBox(width: 4.w),
-                        Text(
-                          '$availableSlots/$totalSlots',
-                          style: TextStyle(
-                            fontSize: 11.sp,
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.timer,
+                                color: Colors.white,
+                                size: 14.sp,
+                              ),
+                              SizedBox(width: 4.w),
+                              Expanded(
+                                child: Text(
+                                  info['nextReturnDate'] != null
+                                      ? 'Returns in ${info['estimatedWaitDays']} days'
+                                      : 'Currently borrowed',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.sp,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
+                          if (hasQueue)
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.people,
+                                  color: Colors.white,
+                                  size: 14.sp,
+                                ),
+                                SizedBox(width: 4.w),
+                                Text(
+                                  '${info['totalInQueue']} in queue',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.sp,
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                // Availability Badge
+                if (!isFullyBorrowed)
+                  Positioned(
+                    bottom: 8.h,
+                    left: isArabic ? null : 8.w,
+                    right: isArabic ? 8.w : null,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                      decoration: BoxDecoration(
+                        color: AppTheme.successColor.withAlpha(242),
+                        borderRadius: BorderRadius.circular(6.r),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withAlpha(51),
+                            blurRadius: 4,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 12.sp,
+                            color: Colors.white,
+                          ),
+                          SizedBox(width: 4.w),
+                          Text(
+                            '${info['availableSlots']}/${info['totalSlots']}',
+                            style: TextStyle(
+                              fontSize: 11.sp,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
             // Game Info
@@ -726,6 +876,8 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
           ],
         ),
       ),
+    );
+      },
     );
   }
 
@@ -934,6 +1086,18 @@ class _BrowseGamesScreenState extends State<BrowseGamesScreen> {
             fontSize: 12.sp,
           ),
         ),
+      ),
+    );
+  }
+
+  void _showEnhancedGameDetails(game_models.GameAccount game, Map<String, dynamic> info) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => EnhancedGameDetailsModal(
+        game: game,
+        availabilityInfo: info,
       ),
     );
   }

@@ -314,41 +314,57 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
     showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          backgroundColor: isDarkMode ? AppTheme.darkSurface : Colors.white,
-          title: Text(
-            isArabic ? 'تفاصيل الحساب' : 'Account Details',
-            style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
-          ),
-          content: SingleChildScrollView(
-            child: Container(
-              width: MediaQuery.of(context).size.width * 0.9,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return StreamBuilder<DocumentSnapshot>(
+              stream: _firestore.collection('games').doc(gameId).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return Center(child: CircularProgressIndicator());
+                }
+                
+                final updatedGameData = snapshot.data!.data() as Map<String, dynamic>?;
+                final updatedAccounts = List<Map<String, dynamic>>.from(updatedGameData?['accounts'] ?? []);
+                final updatedAccount = updatedAccounts.firstWhere(
+                  (a) => a['accountId'] == account['accountId'],
+                  orElse: () => account,
+                );
+                
+                return AlertDialog(
+                  backgroundColor: isDarkMode ? AppTheme.darkSurface : Colors.white,
+                  title: Text(
+                    isArabic ? 'تفاصيل الحساب' : 'Account Details',
+                    style: TextStyle(color: isDarkMode ? Colors.white : Colors.black),
+                  ),
+                  content: SingleChildScrollView(
+                    child: Container(
+                      width: MediaQuery.of(context).size.width * 0.9,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                   // Account ID
                   ListTile(
                     leading: Icon(Icons.fingerprint, color: AppTheme.primaryColor),
                     title: Text(isArabic ? 'معرف الحساب' : 'Account ID'),
-                    subtitle: Text(account['accountId'] ?? 'N/A'),
+                    subtitle: Text(updatedAccount['accountId'] ?? 'N/A'),
                   ),
 
                   // Contributor Info
                   ListTile(
                     leading: Icon(Icons.person, color: AppTheme.primaryColor),
                     title: Text(isArabic ? 'المساهم' : 'Contributor'),
-                    subtitle: Text('${account['contributorName'] ?? 'Unknown'} (ID: ${account['contributorId'] ?? 'N/A'})'),
+                    subtitle: Text('${updatedAccount['contributorName'] ?? 'Unknown'} (ID: ${updatedAccount['contributorId'] ?? 'N/A'})'),
                   ),
 
                   // Date Added
-                  if (account['dateAdded'] != null)
+                  if (updatedAccount['dateAdded'] != null)
                     ListTile(
                       leading: Icon(Icons.calendar_today, color: AppTheme.primaryColor),
                       title: Text(isArabic ? 'تاريخ الإضافة' : 'Date Added'),
                       subtitle: Text(
-                        account['dateAdded'] is Timestamp
-                            ? DateFormat('dd/MM/yyyy').format((account['dateAdded'] as Timestamp).toDate())
+                        updatedAccount['dateAdded'] is Timestamp
+                            ? DateFormat('dd/MM/yyyy').format((updatedAccount['dateAdded'] as Timestamp).toDate())
                             : 'N/A'
                       ),
                     ),
@@ -423,7 +439,7 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
                   ),
                   Wrap(
                     spacing: 8.w,
-                    children: (account['platforms'] as List<dynamic>? ?? [])
+                    children: (updatedAccount['platforms'] as List<dynamic>? ?? [])
                         .map((platform) => Chip(
                       label: Text(platform.toString().toUpperCase()),
                       backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
@@ -438,7 +454,7 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
                   ),
                   Wrap(
                     spacing: 8.w,
-                    children: (account['sharingOptions'] as List<dynamic>? ?? [])
+                    children: (updatedAccount['sharingOptions'] as List<dynamic>? ?? [])
                         .map((option) => Chip(
                       label: Text(option.toString().toUpperCase()),
                       backgroundColor: Colors.green.withOpacity(0.2),
@@ -452,7 +468,7 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
                     isArabic ? 'حالة الفتحات:' : 'Slots Status:',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  ...((account['slots'] as Map<String, dynamic>? ?? {}).entries.map((entry) {
+                  ...((updatedAccount['slots'] as Map<String, dynamic>? ?? {}).entries.map((entry) {
                     final slot = entry.value as Map<String, dynamic>;
                     final status = slot['status'] ?? 'unknown';
                     final borrowerId = slot['borrowerId'];
@@ -469,21 +485,42 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Toggle availability button
-                          IconButton(
-                            icon: Icon(
-                              status == 'available' ? Icons.lock : Icons.lock_open,
-                              color: status == 'available' ? Colors.orange : Colors.green,
-                            ),
-                            onPressed: () => _toggleSlotAvailability(gameId, account['accountId'], entry.key, status),
-                            tooltip: status == 'available' 
-                                ? (isArabic ? 'جعله غير متاح' : 'Make Unavailable')
-                                : (isArabic ? 'جعله متاح' : 'Make Available'),
+                          // Toggle availability switch
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Switch(
+                                value: status == 'available' || status == 'taken',
+                                onChanged: status == 'taken' ? null : (bool value) {
+                                  _toggleSlotAvailability(gameId, updatedAccount['accountId'], entry.key, status);
+                                },
+                                activeColor: AppTheme.successColor,
+                                inactiveThumbColor: Colors.grey.shade400,
+                                inactiveTrackColor: Colors.grey.shade200,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              Text(
+                                status == 'taken' 
+                                    ? (isArabic ? 'مأخوذ' : 'Taken')
+                                    : status == 'available' 
+                                        ? (isArabic ? 'متاح' : 'Available')
+                                        : (isArabic ? 'غير متاح' : 'Unavailable'),
+                                style: TextStyle(
+                                  fontSize: 10.sp,
+                                  color: status == 'taken' 
+                                      ? AppTheme.errorColor
+                                      : status == 'available' 
+                                          ? AppTheme.successColor
+                                          : Colors.grey,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           ),
                           if (status == 'taken')
                             IconButton(
                               icon: Icon(Icons.refresh),
-                              onPressed: () => _returnSlot(gameId, account['accountId'], entry.key),
+                              onPressed: () => _returnSlot(gameId, updatedAccount['accountId'], entry.key),
                               tooltip: isArabic ? 'إرجاع' : 'Return',
                             ),
                         ],
@@ -545,6 +582,10 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
               ),
             ),
           ],
+                );
+              },
+            );
+          },
         );
       },
     );
@@ -588,9 +629,24 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
     }
   }
 
-  // Add this new method to toggle slot availability
+  // Toggle slot availability with better feedback
   Future<void> _toggleSlotAvailability(String gameId, String accountId, String slotKey, String currentStatus) async {
     try {
+      // Don't allow toggling if slot is currently taken
+      if (currentStatus == 'taken') {
+        final appProvider = Provider.of<AppProvider>(context, listen: false);
+        final isArabic = appProvider.isArabic;
+        
+        Fluttertoast.showToast(
+          msg: isArabic 
+            ? 'لا يمكن تعديل الحساب المأخوذ. يرجى إرجاعه أولاً.'
+            : 'Cannot toggle taken slot. Please return it first.',
+          backgroundColor: AppTheme.warningColor,
+          toastLength: Toast.LENGTH_SHORT,
+        );
+        return;
+      }
+
       final gameDoc = await _firestore.collection('games').doc(gameId).get();
       final accounts = List<Map<String, dynamic>>.from(gameDoc.data()?['accounts'] ?? []);
 
@@ -618,17 +674,27 @@ class _ManageGamesScreenState extends State<ManageGamesScreen> with SingleTicker
           'updatedAt': FieldValue.serverTimestamp(),
         });
 
+        final appProvider = Provider.of<AppProvider>(context, listen: false);
+        final isArabic = appProvider.isArabic;
+        
         Fluttertoast.showToast(
-          msg: newStatus == 'available' ? 'Slot made available' : 'Slot made unavailable',
+          msg: newStatus == 'available' 
+              ? (isArabic ? 'تم جعل الحساب متاحاً' : 'Slot made available')
+              : (isArabic ? 'تم جعل الحساب غير متاح' : 'Slot made unavailable'),
           backgroundColor: AppTheme.successColor,
+          toastLength: Toast.LENGTH_SHORT,
         );
 
         setState(() {});
       }
     } catch (e) {
+      final appProvider = Provider.of<AppProvider>(context, listen: false);
+      final isArabic = appProvider.isArabic;
+      
       Fluttertoast.showToast(
-        msg: 'Error updating slot',
+        msg: isArabic ? 'حدث خطأ في تحديث الحساب' : 'Error updating slot',
         backgroundColor: AppTheme.errorColor,
+        toastLength: Toast.LENGTH_SHORT,
       );
     }
   }

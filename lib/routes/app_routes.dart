@@ -14,6 +14,7 @@ class AppRoutes {
   static const String userDashboard = '/user-dashboard';
   static const String browseGames = '/browse-games';
   static const String borrowGame = '/borrow-game';
+  static const String myBorrowings = '/my-borrowings';
   static const String myContributions = '/my-contributions';
   static const String addContribution = '/add-contribution';
   static const String profileScreen = '/profile';
@@ -41,4 +42,7 @@ class AppRoutes {
   static const String adminAnalytics = '/admin-analytics';
   static const String adminSettings = '/admin-settings';
   static const String adminReferralManagement = '/admin-referral-management';
+  static const String manageReturns = '/admin/manage-returns';
+  static const String adminQueueManagement = '/admin/queue-management';
+  static const String adminAccountQueue = '/admin/account-queue';
 }

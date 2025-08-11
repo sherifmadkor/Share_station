@@ -67,83 +67,124 @@ class ReferralService {
     required double subscriptionFee,
   }) async {
     try {
-      print('=== processReferral DEBUG ===');
-      print('Processing referral:');
-      print('  - newUserId: $newUserId');
-      print('  - referrerId (referral code): $referrerId');
-      print('  - newUserTier: $newUserTier');
-      print('  - subscriptionFee: $subscriptionFee');
-      
-      // First, resolve the referral code to actual user ID
+      // Resolve referral code to actual user ID
       final referrerValidation = await validateReferralCode(referrerId);
-      if (referrerValidation == null) {
-        print('Invalid referral code: $referrerId');
-        return false;
-      }
+      if (referrerValidation == null) return false;
       
       final actualReferrerId = referrerValidation['referrerId']!;
-      print('  - resolved actual referrerId: $actualReferrerId');
+      final referralRevenue = subscriptionFee * 0.20; // 20% per BRD
       
       final batch = _firestore.batch();
       
-      // Calculate 20% referral revenue (BRD requirement)
-      final referralRevenue = subscriptionFee * 0.20;
-      print('  - calculated referralRevenue: $referralRevenue');
-
-      // 1. Create referral record for tracking
+      // Create referral record with PENDING status
       final referralRef = _firestore.collection('referrals').doc();
-      print('Creating referral record with ID: ${referralRef.id}');
-      final referralData = {
-        'id': referralRef.id,
+      batch.set(referralRef, {
         'referrerId': actualReferrerId,
         'referredUserId': newUserId,
+        'referralCode': referrerId,
         'referralDate': FieldValue.serverTimestamp(),
+        'tier': newUserTier,
         'subscriptionFee': subscriptionFee,
         'referralRevenue': referralRevenue,
-        'status': 'active',
-        'revenueStatus': 'pending', // Will be processed after 90 days (BRD requirement)
-        'payoutDate': Timestamp.fromDate(
-          DateTime.now().add(Duration(days: 90))
-        ),
-        'tier': newUserTier,
+        'revenueStatus': 'pending', // Will be paid after admin approval
+        'status': 'pending', // Waiting for admin approval
         'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-      print('Referral data: $referralData');
-      batch.set(referralRef, referralData);
-
-      // 2. Update referrer's stats
-      print('Updating referrer stats for: $actualReferrerId');
-      final referrerRef = _firestore.collection('users').doc(actualReferrerId);
-      final referrerUpdates = {
+      });
+      
+      // Update referrer's PENDING stats only
+      batch.update(_firestore.collection('users').doc(actualReferrerId), {
         'totalReferrals': FieldValue.increment(1),
-        'totalReferralRevenue': FieldValue.increment(referralRevenue),
         'pendingReferralRevenue': FieldValue.increment(referralRevenue),
         'referredUsers': FieldValue.arrayUnion([newUserId]),
         'updatedAt': FieldValue.serverTimestamp(),
-      };
-      print('Referrer updates: $referrerUpdates');
-      batch.update(referrerRef, referrerUpdates);
-
-      // 3. Update new user with referrer info (Note: this should store referral code, not user ID)
-      print('Updating new user referrer info: $newUserId');
-      final newUserRef = _firestore.collection('users').doc(newUserId);
-      final newUserUpdates = {
+      });
+      
+      // Update new user with referral info
+      batch.update(_firestore.collection('users').doc(newUserId), {
         'isReferred': true,
         'recruiterId': referrerId, // Store the original referral code
         'updatedAt': FieldValue.serverTimestamp(),
-      };
-      print('New user updates: $newUserUpdates');
-      batch.update(newUserRef, newUserUpdates);
-
-      print('Committing referral batch operations...');
+      });
+      
       await batch.commit();
-      print('Referral processing completed successfully');
-      print('=== END processReferral DEBUG ===');
+      
+      // DO NOT add balance entry here - wait for admin approval
+      
       return true;
     } catch (e) {
       print('Error processing referral: $e');
-      print('Stack trace: ${StackTrace.current}');
+      return false;
+    }
+  }
+
+  /// Process referral rewards after admin approves the referred user
+  Future<bool> processReferralRewardAfterApproval(String referredUserId) async {
+    try {
+      print('Processing referral reward after admin approval for user: $referredUserId');
+      
+      // Find the referral record for this user
+      final referralQuery = await _firestore
+          .collection('referrals')
+          .where('referredUserId', isEqualTo: referredUserId)
+          .where('revenueStatus', isEqualTo: 'pending')
+          .limit(1)
+          .get();
+      
+      if (referralQuery.docs.isEmpty) {
+        print('No pending referral found for user: $referredUserId');
+        return false;
+      }
+      
+      final referralDoc = referralQuery.docs.first;
+      final referralData = referralDoc.data();
+      final referrerId = referralData['referrerId'] as String;
+      final referralRevenue = (referralData['referralRevenue'] ?? 0.0).toDouble();
+      
+      final batch = _firestore.batch();
+      
+      // Update referral record status
+      batch.update(referralDoc.reference, {
+        'revenueStatus': 'approved',
+        'status': 'active',
+        'approvedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Move from pending to paid revenue for referrer
+      batch.update(_firestore.collection('users').doc(referrerId), {
+        'pendingReferralRevenue': FieldValue.increment(-referralRevenue),
+        'paidReferralRevenue': FieldValue.increment(referralRevenue),
+        'referralEarnings': FieldValue.increment(referralRevenue), // Add to total earnings
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      // NOW add the balance entry after admin approval
+      await _balanceService.addBalanceEntry(
+        userId: referrerId,
+        type: 'referralEarnings',
+        amount: referralRevenue,
+        description: 'Referral commission - member approved',
+        expires: true,
+        expiryDays: 90,
+      );
+      
+      print('Successfully processed referral reward: ${referralRevenue} LE for referrer: $referrerId');
+      
+      // Log to referral history
+      await _firestore.collection('referral_history').add({
+        'referrerId': referrerId,
+        'referredUserId': referredUserId,
+        'referralEarnings': referralRevenue,
+        'type': 'registration_referral',
+        'status': 'paid',
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      
+      return true;
+    } catch (e) {
+      print('Error processing referral reward after approval: $e');
       return false;
     }
   }
@@ -839,6 +880,469 @@ class ReferralService {
     } catch (e) {
       print('Error updating referral revenue status: $e');
       return false;
+    }
+  }
+
+  /// Diagnostic function to analyze referral issues for a specific user
+  Future<void> diagnoseReferralIssue(String referrerId) async {
+    try {
+      print('=== REFERRAL DIAGNOSIS FOR USER: $referrerId ===');
+      
+      // 1. Check user's referral stats
+      final userDoc = await _firestore.collection('users').doc(referrerId).get();
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        print('User Referral Stats:');
+        print('  - referralCode: ${userData['referralCode']}');
+        print('  - totalReferrals: ${userData['totalReferrals']}');
+        print('  - totalReferralRevenue: ${userData['totalReferralRevenue']}');
+        print('  - pendingReferralRevenue: ${userData['pendingReferralRevenue']}');
+        print('  - paidReferralRevenue: ${userData['paidReferralRevenue']}');
+        print('  - referralEarnings: ${userData['referralEarnings']}');
+        print('  - balanceEntries count: ${(userData['balanceEntries'] ?? []).length}');
+        
+        // Check for referral balance entries
+        final balanceEntries = List<Map<String, dynamic>>.from(userData['balanceEntries'] ?? []);
+        final referralEntries = balanceEntries.where((e) => e['type'] == 'referralEarnings').toList();
+        print('  - Referral balance entries: ${referralEntries.length}');
+        for (var entry in referralEntries) {
+          print('    - Amount: ${entry['amount']}, Expired: ${entry['isExpired']}');
+        }
+      }
+      
+      // 2. Check referral records
+      print('\nReferral Records:');
+      final referralDocs = await _firestore
+          .collection('referrals')
+          .where('referrerId', isEqualTo: referrerId)
+          .get();
+      
+      print('Found ${referralDocs.docs.length} referral records');
+      for (var doc in referralDocs.docs) {
+        final data = doc.data();
+        print('  Referral ${doc.id}:');
+        print('    - referredUserId: ${data['referredUserId']}');
+        print('    - revenueStatus: ${data['revenueStatus']}');
+        print('    - status: ${data['status']}');
+        print('    - referralRevenue: ${data['referralRevenue']}');
+        print('    - subscriptionFee: ${data['subscriptionFee']}');
+        
+        // Check the referred user's status
+        final referredUserDoc = await _firestore
+            .collection('users')
+            .doc(data['referredUserId'])
+            .get();
+        if (referredUserDoc.exists) {
+          final referredData = referredUserDoc.data()!;
+          print('    - Referred user status: ${referredData['status']}');
+          print('    - Referred user tier: ${referredData['tier']}');
+        }
+      }
+      
+      print('=== END DIAGNOSIS ===');
+    } catch (e) {
+      print('Error in diagnosis: $e');
+    }
+  }
+
+  /// Comprehensive diagnosis of all referral system inconsistencies
+  Future<void> comprehensiveDiagnosis() async {
+    try {
+      print('=== COMPREHENSIVE REFERRAL SYSTEM DIAGNOSIS ===');
+      
+      // 1. Check all users for referral data inconsistencies
+      final usersSnapshot = await _firestore.collection('users').get();
+      
+      print('\n1. USERS WITH REFERRAL DATA:');
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+        final recruiterId = userData['recruiterId'];
+        
+        if (recruiterId != null && recruiterId.toString().isNotEmpty) {
+          print('\nUser: ${userDoc.id} (${userData['name']})');
+          print('  - recruiterId value: "$recruiterId"');
+          print('  - recruiterId type: ${recruiterId.runtimeType}');
+          print('  - Is Firebase UID format: ${recruiterId.toString().length > 20}');
+          print('  - Is referral code format: ${RegExp(r'^[A-Z]{3}\d{3}$').hasMatch(recruiterId.toString())}');
+          print('  - referralCode: ${userData['referralCode']}');
+          print('  - referralEarnings: ${userData['referralEarnings'] ?? 0}');
+          print('  - Balance entries with referralEarnings: ${(userData['balanceEntries'] ?? []).where((e) => e['type'] == 'referralEarnings').length}');
+        }
+      }
+      
+      // 2. Check all referral records
+      print('\n2. REFERRAL RECORDS:');
+      final referralsSnapshot = await _firestore.collection('referrals').get();
+      
+      for (var refDoc in referralsSnapshot.docs) {
+        final refData = refDoc.data();
+        print('\nReferral: ${refDoc.id}');
+        print('  - referrerId: ${refData['referrerId']}');
+        print('  - Is Firebase UID: ${refData['referrerId'].toString().length > 20}');
+        print('  - referredUserId: ${refData['referredUserId']}');
+        print('  - referralRevenue: ${refData['referralRevenue']}');
+        print('  - revenueStatus: ${refData['revenueStatus']}');
+        print('  - status: ${refData['status']}');
+        
+        // Check if referrer exists
+        if (refData['referrerId'].toString().length > 20) {
+          final referrerExists = (await _firestore.collection('users').doc(refData['referrerId']).get()).exists;
+          print('  - Referrer exists in users: $referrerExists');
+        } else {
+          // It's a referral code, find the user
+          final userQuery = await _firestore
+              .collection('users')
+              .where('referralCode', isEqualTo: refData['referrerId'])
+              .get();
+          print('  - Users with this referral code: ${userQuery.docs.length}');
+          if (userQuery.docs.isNotEmpty) {
+            print('  - Actual referrer UID: ${userQuery.docs.first.id}');
+          }
+        }
+      }
+      
+      print('\n=== END DIAGNOSIS ===');
+    } catch (e) {
+      print('Diagnosis error: $e');
+    }
+  }
+
+  /// Complete referral system fix - handles all inconsistencies
+  Future<Map<String, dynamic>> completeReferralSystemFix() async {
+    try {
+      print('=== STARTING COMPLETE REFERRAL SYSTEM FIX ===');
+      
+      int fixedUsers = 0;
+      int fixedReferrals = 0;
+      int createdBalanceEntries = 0;
+      double totalBalanceAdded = 0;
+      
+      // Step 1: Create a mapping of referral codes to user IDs
+      print('\nStep 1: Building referral code mapping...');
+      final Map<String, String> referralCodeToUserId = {};
+      final usersSnapshot = await _firestore.collection('users').get();
+      
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+        final referralCode = userData['referralCode'];
+        if (referralCode != null && referralCode.toString().isNotEmpty) {
+          referralCodeToUserId[referralCode] = userDoc.id;
+          print('  Mapped: $referralCode -> ${userDoc.id}');
+        }
+      }
+      
+      // Step 2: Fix all users with referral code in recruiterId field
+      print('\nStep 2: Fixing user documents...');
+      final batch1 = _firestore.batch();
+      int batchCount = 0;
+      
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+        final recruiterId = userData['recruiterId'];
+        
+        if (recruiterId != null && recruiterId.toString().isNotEmpty) {
+          // Check if it's a referral code (not a Firebase UID)
+          if (RegExp(r'^[A-Z]{3}\d{3}$').hasMatch(recruiterId.toString())) {
+            print('  Found user with referral code in recruiterId: ${userDoc.id}');
+            
+            // Find the actual referrer UID
+            final actualReferrerId = referralCodeToUserId[recruiterId];
+            
+            if (actualReferrerId != null) {
+              print('    Converting $recruiterId -> $actualReferrerId');
+              
+              // Update to store BOTH for backward compatibility
+              batch1.update(userDoc.reference, {
+                'recruiterId': actualReferrerId, // Store actual Firebase UID
+                'recruiterCode': recruiterId, // Keep the original code
+                'fixedAt': FieldValue.serverTimestamp(),
+              });
+              
+              fixedUsers++;
+              batchCount++;
+              
+              if (batchCount >= 400) {
+                await batch1.commit();
+                batchCount = 0;
+              }
+            }
+          }
+        }
+      }
+      
+      if (batchCount > 0) {
+        await batch1.commit();
+      }
+      
+      // Step 3: Fix all referral records
+      print('\nStep 3: Fixing referral records...');
+      final referralsSnapshot = await _firestore.collection('referrals').get();
+      final batch2 = _firestore.batch();
+      batchCount = 0;
+      
+      for (var refDoc in referralsSnapshot.docs) {
+        final refData = refDoc.data();
+        final referrerId = refData['referrerId'];
+        
+        // Check if it's a referral code
+        if (referrerId != null && RegExp(r'^[A-Z]{3}\d{3}$').hasMatch(referrerId.toString())) {
+          final actualReferrerId = referralCodeToUserId[referrerId];
+          
+          if (actualReferrerId != null) {
+            print('  Fixing referral record: ${refDoc.id}');
+            print('    Converting referrerId: $referrerId -> $actualReferrerId');
+            
+            batch2.update(refDoc.reference, {
+              'referrerId': actualReferrerId,
+              'originalReferralCode': referrerId,
+              'fixedAt': FieldValue.serverTimestamp(),
+            });
+            
+            fixedReferrals++;
+            batchCount++;
+            
+            if (batchCount >= 400) {
+              await batch2.commit();
+              batchCount = 0;
+            }
+          }
+        }
+      }
+      
+      if (batchCount > 0) {
+        await batch2.commit();
+      }
+      
+      // Step 4: Process all approved referrals that don't have balance entries
+      print('\nStep 4: Creating missing balance entries...');
+      
+      // Re-fetch referrals after fixes
+      final fixedReferralsSnapshot = await _firestore.collection('referrals').get();
+      
+      for (var refDoc in fixedReferralsSnapshot.docs) {
+        final refData = refDoc.data();
+        final referrerId = refData['referrerId'];
+        final referredUserId = refData['referredUserId'];
+        final revenueStatus = refData['revenueStatus'];
+        final referralRevenue = (refData['referralRevenue'] ?? 0.0).toDouble();
+        
+        if (referrerId == null || referredUserId == null) continue;
+        
+        // Check if referred user is active
+        final referredUserDoc = await _firestore.collection('users').doc(referredUserId).get();
+        if (!referredUserDoc.exists) continue;
+        
+        final referredUserData = referredUserDoc.data()!;
+        final userStatus = referredUserData['status'];
+        
+        // If user is active but revenue not yet paid
+        if (userStatus == 'active' && revenueStatus != 'paid' && referralRevenue > 0) {
+          print('  Processing referral for active user: $referredUserId');
+          print('    Referrer: $referrerId, Revenue: $referralRevenue LE');
+          
+          // Get referrer document
+          final referrerDoc = await _firestore.collection('users').doc(referrerId).get();
+          if (!referrerDoc.exists) {
+            print('    ERROR: Referrer not found!');
+            continue;
+          }
+          
+          // Check if balance entry already exists
+          final referrerData = referrerDoc.data()!;
+          final balanceEntries = List<Map<String, dynamic>>.from(
+            referrerData['balanceEntries'] ?? []
+          );
+          
+          bool hasEntry = balanceEntries.any((entry) => 
+            entry['type'] == 'referralEarnings' &&
+            (entry['description']?.contains('approved') == true ||
+             entry['description']?.contains(referredUserId) == true)
+          );
+          
+          if (!hasEntry) {
+            print('    Creating balance entry...');
+            
+            // Create the balance entry using BalanceService
+            await _balanceService.addBalanceEntry(
+              userId: referrerId,
+              type: 'referralEarnings',
+              amount: referralRevenue,
+              description: 'Referral commission - member approved (fixed)',
+              expires: true,
+              expiryDays: 90,
+            );
+            
+            // Update referral record
+            await refDoc.reference.update({
+              'revenueStatus': 'paid',
+              'status': 'active',
+              'paidAt': FieldValue.serverTimestamp(),
+              'fixedAt': FieldValue.serverTimestamp(),
+            });
+            
+            // Update referrer's revenue tracking
+            await _firestore.collection('users').doc(referrerId).update({
+              'pendingReferralRevenue': FieldValue.increment(-referralRevenue),
+              'paidReferralRevenue': FieldValue.increment(referralRevenue),
+              'referralEarnings': FieldValue.increment(referralRevenue),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+            
+            createdBalanceEntries++;
+            totalBalanceAdded += referralRevenue;
+            print('    SUCCESS: Balance entry created!');
+          } else {
+            print('    Balance entry already exists');
+            
+            // Just update the referral status
+            await refDoc.reference.update({
+              'revenueStatus': 'paid',
+              'status': 'active',
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+      }
+      
+      print('\n=== FIX COMPLETE ===');
+      print('Results:');
+      print('  - Fixed users: $fixedUsers');
+      print('  - Fixed referral records: $fixedReferrals');
+      print('  - Created balance entries: $createdBalanceEntries');
+      print('  - Total balance added: $totalBalanceAdded LE');
+      
+      return {
+        'success': true,
+        'fixedUsers': fixedUsers,
+        'fixedReferrals': fixedReferrals,
+        'createdBalanceEntries': createdBalanceEntries,
+        'totalBalanceAdded': totalBalanceAdded,
+        'message': 'Fixed $fixedUsers users, $fixedReferrals referrals, created $createdBalanceEntries balance entries totaling ${totalBalanceAdded.toStringAsFixed(2)} LE',
+      };
+    } catch (e) {
+      print('Error in complete fix: $e');
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
+    }
+  }
+
+  /// Fix missing referral balance entries for approved users
+  Future<Map<String, dynamic>> fixMissingReferralBalances() async {
+    try {
+      print('=== FIXING MISSING REFERRAL BALANCES ===');
+      int fixedCount = 0;
+      double totalFixed = 0;
+      
+      // Get all referral records
+      final referralDocs = await _firestore
+          .collection('referrals')
+          .get();
+      
+      for (var referralDoc in referralDocs.docs) {
+        final referralData = referralDoc.data();
+        final referrerId = referralData['referrerId'] as String?;
+        final referredUserId = referralData['referredUserId'] as String?;
+        final revenueStatus = referralData['revenueStatus'] as String?;
+        final referralRevenue = (referralData['referralRevenue'] ?? 0.0).toDouble();
+        
+        if (referrerId == null || referredUserId == null) continue;
+        
+        // Check if referred user is active/approved
+        final referredUserDoc = await _firestore
+            .collection('users')
+            .doc(referredUserId)
+            .get();
+        
+        if (!referredUserDoc.exists) continue;
+        
+        final referredUserData = referredUserDoc.data()!;
+        final userStatus = referredUserData['status'] ?? 'pending';
+        
+        // If user is active but referral revenue is still pending
+        if (userStatus == 'active' && revenueStatus == 'pending') {
+          print('Found pending referral for active user:');
+          print('  - Referral ID: ${referralDoc.id}');
+          print('  - Referrer: $referrerId');
+          print('  - Referred User: $referredUserId');
+          print('  - Revenue: $referralRevenue LE');
+          
+          // Check if balance entry already exists
+          final referrerDoc = await _firestore.collection('users').doc(referrerId).get();
+          if (referrerDoc.exists) {
+            final referrerData = referrerDoc.data()!;
+            final balanceEntries = List<Map<String, dynamic>>.from(
+              referrerData['balanceEntries'] ?? []
+            );
+            
+            // Check if this referral already has a balance entry
+            bool hasEntry = balanceEntries.any((entry) => 
+              entry['description']?.contains(referredUserId) == true &&
+              entry['type'] == 'referralEarnings'
+            );
+            
+            if (!hasEntry) {
+              print('  - Creating missing balance entry...');
+              
+              // Create the balance entry
+              await _balanceService.addBalanceEntry(
+                userId: referrerId,
+                type: 'referralEarnings',
+                amount: referralRevenue,
+                description: 'Referral commission (fixed) - $referredUserId',
+                expires: true,
+                expiryDays: 90,
+              );
+              
+              // Update referral record
+              await referralDoc.reference.update({
+                'revenueStatus': 'paid',
+                'status': 'active',
+                'fixedAt': FieldValue.serverTimestamp(),
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+              
+              // Update user's revenue tracking
+              await _firestore.collection('users').doc(referrerId).update({
+                'pendingReferralRevenue': FieldValue.increment(-referralRevenue),
+                'paidReferralRevenue': FieldValue.increment(referralRevenue),
+                'referralEarnings': FieldValue.increment(referralRevenue),
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+              
+              fixedCount++;
+              totalFixed += referralRevenue;
+              print('  - Fixed successfully!');
+            } else {
+              print('  - Balance entry already exists, updating status only');
+              
+              // Just update the referral status
+              await referralDoc.reference.update({
+                'revenueStatus': 'paid',
+                'status': 'active',
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+            }
+          }
+        }
+      }
+      
+      print('=== FIX COMPLETE ===');
+      print('Fixed $fixedCount referrals, total amount: $totalFixed LE');
+      
+      return {
+        'success': true,
+        'fixedCount': fixedCount,
+        'totalAmount': totalFixed,
+        'message': 'Fixed $fixedCount missing referral balances totaling $totalFixed LE',
+      };
+    } catch (e) {
+      print('Error fixing referral balances: $e');
+      return {
+        'success': false,
+        'message': 'Error: $e',
+      };
     }
   }
 

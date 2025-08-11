@@ -20,9 +20,11 @@ import '../admin/analytics_screen.dart';
 import '../admin/settings_screen.dart';
 import '../../../services/suspension_service.dart';
 import '../../../services/balance_service.dart';
+import '../../../services/queue_service.dart';
 import '../user/browse_games_screen.dart';
 import '../user/my_borrowings_screen.dart';
 import '../user/profile_screen.dart';
+import '../../widgets/admin_migration_widget.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({Key? key}) : super(key: key);
@@ -36,6 +38,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final SuspensionService _suspensionService = SuspensionService();
   final BalanceService _balanceService = BalanceService();
+  final QueueService _queueService = QueueService();
 
   int _selectedIndex = 0;
 
@@ -47,6 +50,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _pendingContributions = 0;
   int _pendingBorrows = 0;
   int _activeBorrows = 0;
+  int _pendingReturns = 0;
+  int _activeQueues = 0;
   double _totalRevenue = 0;
 
   // Borrow Window Status
@@ -121,6 +126,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .count()
           .get();
 
+      // Get pending returns count
+      final pendingReturnsQuery = await _firestore
+          .collection('return_requests')
+          .where('status', isEqualTo: 'pending')
+          .count()
+          .get();
+
+      // Get active queues count
+      final queueStats = await _queueService.getQueueStatistics();
+
       // Calculate revenue
       _totalRevenue = 0;
       for (var doc in usersQuery.docs) {
@@ -136,6 +151,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _pendingContributions = pendingContribQuery.count ?? 0;
           _pendingBorrows = pendingBorrowQuery.count ?? 0;
           _activeBorrows = activeBorrowQuery.count ?? 0;
+          _pendingReturns = pendingReturnsQuery.count ?? 0;
+          _activeQueues = queueStats['totalActiveQueues'] ?? 0;
         });
       }
     } catch (e) {
@@ -1020,6 +1037,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             SizedBox(height: 24.h),
 
+            // Migration Widget
+            const AdminMigrationWidget(),
+
+            SizedBox(height: 24.h),
+
             // System Maintenance Buttons - YOUR ORIGINAL
             Text(
               isArabic ? 'صيانة النظام' : 'System Maintenance',
@@ -1204,6 +1226,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ).then((_) => _loadStatistics());
           },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'طلبات الإرجاع' : 'Return Requests',
+          subtitle: isArabic ? 'إدارة الإرجاع' : 'Manage Returns',
+          icon: Icons.assignment_return,
+          color: Colors.orange,
+          badge: _pendingReturns > 0 ? _pendingReturns.toString() : null,
+          onTap: () => Navigator.pushNamed(context, AppRoutes.manageReturns),
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'إدارة القوائم' : 'Queue Management',
+          subtitle: isArabic ? 'مراقبة قوائم الانتظار' : 'Monitor Queues',
+          icon: Icons.queue,
+          color: Colors.teal,
+          badge: _activeQueues > 0 ? _activeQueues.toString() : null,
+          onTap: () => Navigator.pushNamed(context, AppRoutes.adminQueueManagement),
         ),
 
         _buildAdminActionCard(
@@ -1466,9 +1506,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
         ElevatedButton.icon(
           onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Queue Monitoring - Coming Soon')),
-            );
+            Navigator.pushNamed(context, AppRoutes.adminQueueManagement);
           },
           icon: Icon(Icons.queue, size: 16.sp),
           label: Text(
