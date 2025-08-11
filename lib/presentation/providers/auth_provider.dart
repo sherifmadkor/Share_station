@@ -208,8 +208,13 @@ class AuthProvider extends ChangeNotifier {
             'status': tier == UserTier.user ? 'active' : 'pending',
             'joinDate': Timestamp.now(),
             'origin': 'App Registration',
-            'recruiterId': referrerId ?? '',
+            'recruiterId': '', // Will store referral code if user was referred
             'referredUsers': [],
+            'referralCode': _referralService.generateReferralCode(name, memberId),
+            'totalReferrals': 0,
+            'totalReferralRevenue': 0.0,
+            'pendingReferralRevenue': 0.0,
+            'paidReferralRevenue': 0.0,
             'borrowValue': 0,
             'sellValue': 0,
             'refunds': 0,
@@ -266,12 +271,34 @@ class AuthProvider extends ChangeNotifier {
 
         // Process referral using the referral service
         if (referrerId != null && referrerId.isNotEmpty) {
-          await _referralService.processReferral(
-            newUserId: credential.user!.uid,
-            referralCode: referrerId,
-            membershipFee: subscriptionFee,
-            userTier: tier.value,
-          );
+          print('Processing referral with code: $referrerId');
+          
+          // First validate the referral code and get the referrer's user ID
+          final referrerInfo = await _referralService.validateReferralCode(referrerId);
+          print('Referrer info: $referrerInfo');
+          
+          if (referrerInfo != null) {
+            final actualReferrerId = referrerInfo['referrerId'];
+            print('Found actual referrer ID: $actualReferrerId');
+            
+            // Update new user with referrer information - store referral code in recruiterId
+            await _firestore.collection('users').doc(credential.user!.uid).update({
+              'recruiterId': referrerId, // Store the referral code, not user ID
+              'recruiterName': referrerInfo['referrerName'],
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+            
+            // Process the referral with the referral code (processReferral will resolve it)
+            final success = await _referralService.processReferral(
+              newUserId: credential.user!.uid,
+              referrerId: referrerId, // Pass the referral code, not the user ID
+              newUserTier: tier.value,
+              subscriptionFee: subscriptionFee,
+            );
+            print('Referral processing success: $success');
+          } else {
+            print('Invalid referral code: $referrerId');
+          }
         }
 
         try {

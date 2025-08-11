@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 // Import game_model with prefix to avoid Platform conflict
 import '../data/models/game_model.dart' as game_models;
-import '../data/models/user_model.dart';
 import 'suspension_service.dart';
 import 'balance_service.dart';
 import 'referral_service.dart';
@@ -414,9 +413,8 @@ class ContributionService {
       // Process referral earnings for this contribution
       await _referralService.processActivityReferralEarnings(
         userId: userId,
-        transactionAmount: gameValue,
+        activityFee: gameValue,
         activityType: 'contribution',
-        activityDescription: 'Game contribution: $gameTitle',
       );
 
       // Update user contribution activity and check for VIP promotion
@@ -536,9 +534,8 @@ class ContributionService {
       // Process referral earnings for this fund contribution
       await _referralService.processActivityReferralEarnings(
         userId: userId,
-        transactionAmount: amount,
+        activityFee: amount,
         activityType: 'fund_contribution',
-        activityDescription: 'Fund contribution: $gameTitle',
       );
 
       // Update user contribution activity and check for VIP promotion

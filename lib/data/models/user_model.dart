@@ -304,7 +304,12 @@ class UserModel {
   // Referral Info
   final String? recruiterId;
   final String? recruiterName;
+  final String referralCode; // Unique referral code for this user
   final List<String> referredUsers; // List of referred user IDs
+  final int totalReferrals; // Total number of successful referrals
+  final double totalReferralRevenue; // Total earnings from referrals
+  final double pendingReferralRevenue; // Revenue pending (within 90 days)
+  final double paidReferralRevenue; // Revenue already paid out
 
   // Balance Components (all in LE)
   final double borrowValue; // 70% of game value when others borrow
@@ -382,7 +387,12 @@ class UserModel {
     required this.origin,
     this.recruiterId,
     this.recruiterName,
+    required this.referralCode,
     required this.referredUsers,
+    required this.totalReferrals,
+    required this.totalReferralRevenue,
+    required this.pendingReferralRevenue,
+    required this.paidReferralRevenue,
     required this.borrowValue,
     required this.sellValue,
     required this.refunds,
@@ -607,9 +617,14 @@ class UserModel {
       origin: UserOrigin.fromString(data['origin']?.toString() ?? 'direct'),
       recruiterId: data['recruiterId']?.toString(),
       recruiterName: data['recruiterName']?.toString(),
+      referralCode: data['referralCode']?.toString() ?? '',
       referredUsers: data['referredUsers'] != null
           ? List<String>.from((data['referredUsers'] as List).map((e) => e.toString()))
           : [],
+      totalReferrals: _parseInt(data['totalReferrals']),
+      totalReferralRevenue: _parseDouble(data['totalReferralRevenue']),
+      pendingReferralRevenue: _parseDouble(data['pendingReferralRevenue']),
+      paidReferralRevenue: _parseDouble(data['paidReferralRevenue']),
       borrowValue: _parseDouble(data['borrowValue']),
       sellValue: _parseDouble(data['sellValue']),
       refunds: _parseDouble(data['refunds']),
@@ -703,7 +718,12 @@ class UserModel {
       'origin': origin.value,
       'recruiterId': recruiterId,
       'recruiterName': recruiterName,
+      'referralCode': referralCode,
       'referredUsers': referredUsers,
+      'totalReferrals': totalReferrals,
+      'totalReferralRevenue': totalReferralRevenue,
+      'pendingReferralRevenue': pendingReferralRevenue,
+      'paidReferralRevenue': paidReferralRevenue,
       'borrowValue': borrowValue,
       'sellValue': sellValue,
       'refunds': refunds,
@@ -770,7 +790,12 @@ class UserModel {
     UserOrigin? origin,
     String? recruiterId,
     String? recruiterName,
+    String? referralCode,
     List<String>? referredUsers,
+    int? totalReferrals,
+    double? totalReferralRevenue,
+    double? pendingReferralRevenue,
+    double? paidReferralRevenue,
     double? borrowValue,
     double? sellValue,
     double? refunds,
@@ -830,7 +855,12 @@ class UserModel {
       origin: origin ?? this.origin,
       recruiterId: recruiterId ?? this.recruiterId,
       recruiterName: recruiterName ?? this.recruiterName,
+      referralCode: referralCode ?? this.referralCode,
       referredUsers: referredUsers ?? this.referredUsers,
+      totalReferrals: totalReferrals ?? this.totalReferrals,
+      totalReferralRevenue: totalReferralRevenue ?? this.totalReferralRevenue,
+      pendingReferralRevenue: pendingReferralRevenue ?? this.pendingReferralRevenue,
+      paidReferralRevenue: paidReferralRevenue ?? this.paidReferralRevenue,
       borrowValue: borrowValue ?? this.borrowValue,
       sellValue: sellValue ?? this.sellValue,
       refunds: refunds ?? this.refunds,

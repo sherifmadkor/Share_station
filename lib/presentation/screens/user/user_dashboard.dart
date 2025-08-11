@@ -48,6 +48,8 @@ class _UserDashboardState extends State<UserDashboard> {
   double _fundShares = 0;
   double _totalShares = 0;
   double _referralEarnings = 0;
+  int _totalReferrals = 0;
+  int _newReferrals = 0;
   int _totalBorrows = 0;
   int _activeBorrows = 0;
   int _queuePositions = 0;
@@ -62,6 +64,30 @@ class _UserDashboardState extends State<UserDashboard> {
   void initState() {
     super.initState();
     _loadUserData();
+  }
+
+  Future<void> _checkNewReferrals(String userId) async {
+    try {
+      // Get referrals made in the last 24 hours
+      final twentyFourHoursAgo = Timestamp.fromDate(
+        DateTime.now().subtract(Duration(hours: 24))
+      );
+
+      final newReferralsQuery = await _firestore
+          .collection('referrals')
+          .where('referrerId', isEqualTo: userId)
+          .where('referralDate', isGreaterThan: twentyFourHoursAgo)
+          .get();
+
+      setState(() {
+        _newReferrals = newReferralsQuery.docs.length;
+      });
+    } catch (e) {
+      print('Error checking new referrals: $e');
+      setState(() {
+        _newReferrals = 0;
+      });
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -88,6 +114,7 @@ class _UserDashboardState extends State<UserDashboard> {
           _fundShares = (userData['fundShares'] ?? 0).toDouble();
           _totalShares = (userData['totalShares'] ?? 0).toDouble();
           _referralEarnings = (userData['referralEarnings'] ?? 0).toDouble();
+          _totalReferrals = (userData['totalReferrals'] ?? 0).toInt();
           _totalBorrows = (userData['totalBorrowsCount'] ?? 0).toInt();
           _stationLimit = (userData['stationLimit'] ?? 0).toDouble();
           _remainingStationLimit = (userData['remainingStationLimit'] ?? _stationLimit).toDouble();
@@ -95,6 +122,9 @@ class _UserDashboardState extends State<UserDashboard> {
           _memberId = userData['memberId'] ?? 'N/A';
           _coolDownEndDate = userData['coolDownEndDate'] as Timestamp?;
         });
+
+        // Check for new referrals (referrals made in the last 24 hours)
+        await _checkNewReferrals(currentUser.uid);
 
         // Load active borrows
         final borrowsQuery = await _firestore
@@ -136,6 +166,12 @@ class _UserDashboardState extends State<UserDashboard> {
     final cashIn = userData['cashIn'];
     if (cashIn != null) {
       total += cashIn is int ? cashIn.toDouble() : cashIn;
+    }
+
+    // Add referral earnings to balance
+    final referralEarnings = userData['referralEarnings'];
+    if (referralEarnings != null) {
+      total += referralEarnings is int ? referralEarnings.toDouble() : referralEarnings;
     }
 
     return total;
@@ -319,8 +355,12 @@ class _UserDashboardState extends State<UserDashboard> {
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          // Drawer Header
-          DrawerHeader(
+
+          //-- START OF THE FIX: The original DrawerHeader is replaced with this Container --//
+          Container(
+            // NO height property. This lets the container be as tall as its content.
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(16.w, MediaQuery.of(context).padding.top + 16.h, 16.w, 16.h),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [AppTheme.primaryColor, AppTheme.primaryColor.withOpacity(0.7)],
@@ -330,9 +370,10 @@ class _UserDashboardState extends State<UserDashboard> {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, // Ensure column only takes up needed space
               children: [
                 CircleAvatar(
-                  radius: 30,
+                  radius: 30.r,
                   backgroundColor: Colors.white,
                   child: Text(
                     user?.name?.substring(0, 1).toUpperCase() ?? 'U',
@@ -343,7 +384,7 @@ class _UserDashboardState extends State<UserDashboard> {
                     ),
                   ),
                 ),
-                SizedBox(height: 4.h),
+                SizedBox(height: 12.h),
                 Text(
                   user?.name ?? 'User',
                   style: TextStyle(
@@ -352,6 +393,7 @@ class _UserDashboardState extends State<UserDashboard> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+                SizedBox(height: 4.h),
                 Text(
                   user?.email ?? '',
                   style: TextStyle(
@@ -359,7 +401,7 @@ class _UserDashboardState extends State<UserDashboard> {
                     fontSize: 14.sp,
                   ),
                 ),
-                SizedBox(height: 4),
+                SizedBox(height: 8.h),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 2.h),
                   decoration: BoxDecoration(
@@ -378,6 +420,7 @@ class _UserDashboardState extends State<UserDashboard> {
               ],
             ),
           ),
+          //-- END OF THE FIX --//
 
           // Quick Actions Section
           _buildDrawerSection(
@@ -474,8 +517,36 @@ class _UserDashboardState extends State<UserDashboard> {
           ListTile(
             leading: Icon(FontAwesomeIcons.userGroup, color: AppTheme.primaryColor),
             title: Text(isArabic ? 'الإحالات' : 'Referrals'),
-            trailing: Icon(Icons.arrow_forward_ios, size: 16),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_newReferrals > 0)
+                  Container(
+                    padding: EdgeInsets.all(6.w),
+                    margin: EdgeInsets.only(right: 8.w),
+                    decoration: BoxDecoration(
+                      color: AppTheme.errorColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      _newReferrals > 99 ? '99+' : _newReferrals.toString(),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                Icon(Icons.arrow_forward_ios, size: 16),
+              ],
+            ),
             onTap: () {
+              // Clear new referrals notification
+              if (_newReferrals > 0) {
+                setState(() {
+                  _newReferrals = 0;
+                });
+              }
               Navigator.pop(context);
               Navigator.pushNamed(context, AppRoutes.referralDashboard);
             },
@@ -575,6 +646,7 @@ class _UserDashboardState extends State<UserDashboard> {
       ),
     );
   }
+
 
   Widget _buildDrawerSection({
     required String title,
@@ -805,16 +877,25 @@ class _UserDashboardState extends State<UserDashboard> {
                   ),
                 ),
                 InkWell(
-                  onTap: () => Navigator.pushNamed(context, AppRoutes.referralDashboard),
+                  onTap: () async {
+                    // Clear new referrals notification when user opens referral dashboard
+                    if (_newReferrals > 0) {
+                      setState(() {
+                        _newReferrals = 0;
+                      });
+                    }
+                    await Navigator.pushNamed(context, AppRoutes.referralDashboard);
+                  },
                   borderRadius: BorderRadius.circular(12.r),
                   child: _buildStatCard(
                     title: isArabic ? 'الإحالات' : 'Referrals',
-                    value: _referralEarnings.toStringAsFixed(0),
-                    subtitle: isArabic ? 'ج.م مكتسب' : 'LE earned',
+                    value: _totalReferrals.toString(),
+                    subtitle: isArabic ? 'إجمالي الإحالات' : 'Total Referred',
                     icon: FontAwesomeIcons.userGroup,
                     color: AppTheme.secondaryColor,
                     isDarkMode: isDarkMode,
-                    hasNotification: false,
+                    hasNotification: _newReferrals > 0,
+                    notificationCount: _newReferrals,
                   ),
                 ),
                 InkWell(
@@ -948,6 +1029,7 @@ class _UserDashboardState extends State<UserDashboard> {
     required Color color,
     required bool isDarkMode,
     bool hasNotification = false,
+    int notificationCount = 0,
   }) {
     return Container(
       padding: EdgeInsets.all(16.w),
@@ -1012,12 +1094,27 @@ class _UserDashboardState extends State<UserDashboard> {
               top: 0,
               right: 0,
               child: Container(
-                width: 12.w,
-                height: 12.w,
+                padding: notificationCount > 0 ? EdgeInsets.all(4.w) : null,
+                constraints: BoxConstraints(
+                  minWidth: 12.w,
+                  minHeight: 12.w,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.errorColor,
                   shape: BoxShape.circle,
                 ),
+                child: notificationCount > 0
+                    ? Center(
+                        child: Text(
+                          notificationCount > 99 ? '99+' : notificationCount.toString(),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 8.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      )
+                    : null,
               ),
             ),
         ],

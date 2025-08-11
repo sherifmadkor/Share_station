@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 // Import with prefix to avoid conflicts
 import '../data/models/game_model.dart' as game_models;
-import '../data/models/user_model.dart';
 import 'suspension_service.dart';
 import 'queue_service.dart';
 import 'points_service.dart';
@@ -504,9 +503,8 @@ class BorrowService {
       // Process referral earnings for this transaction
       await _referralService.processActivityReferralEarnings(
         userId: data['userId'],
-        transactionAmount: actualBorrowValue,
+        activityFee: actualBorrowValue,
         activityType: 'borrow',
-        activityDescription: 'Game borrowing: ${data['gameTitle']}',
       );
 
       // Get user data for metrics processing

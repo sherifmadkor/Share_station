@@ -533,22 +533,34 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildStatCard(
-                        icon: Icons.account_balance_wallet,
-                        label: isArabic ? 'الرصيد' : 'Balance',
-                        value: '${user?.totalBalance.toStringAsFixed(0) ?? '0'} LE',
-                        color: AppTheme.successColor,
-                        isDarkMode: isDarkMode,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/balance-details');
+                        },
+                        borderRadius: BorderRadius.circular(16.r),
+                        child: _buildStatCard(
+                          icon: Icons.account_balance_wallet,
+                          label: isArabic ? 'الرصيد' : 'Balance',
+                          value: '${user?.totalBalance.toStringAsFixed(0) ?? '0'} LE',
+                          color: AppTheme.successColor,
+                          isDarkMode: isDarkMode,
+                        ),
                       ),
                     ),
                     SizedBox(width: 12.w),
                     Expanded(
-                      child: _buildStatCard(
-                        icon: Icons.stars,
-                        label: isArabic ? 'النقاط' : 'Points',
-                        value: '${user?.points ?? 0}',
-                        color: AppTheme.warningColor,
-                        isDarkMode: isDarkMode,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/points-redemption');
+                        },
+                        borderRadius: BorderRadius.circular(16.r),
+                        child: _buildStatCard(
+                          icon: Icons.stars,
+                          label: isArabic ? 'النقاط' : 'Points',
+                          value: '${user?.points ?? 0}',
+                          color: AppTheme.warningColor,
+                          isDarkMode: isDarkMode,
+                        ),
                       ),
                     ),
                   ],
@@ -557,22 +569,34 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildStatCard(
-                        icon: Icons.trending_up,
-                        label: isArabic ? 'حد المحطة' : 'Station Limit',
-                        value: '${user?.stationLimit ?? 0}',
-                        color: AppTheme.primaryColor,
-                        isDarkMode: isDarkMode,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/balance-details');
+                        },
+                        borderRadius: BorderRadius.circular(16.r),
+                        child: _buildStatCard(
+                          icon: Icons.trending_up,
+                          label: isArabic ? 'حد المحطة' : 'Station Limit',
+                          value: '${user?.stationLimit ?? 0}',
+                          color: AppTheme.primaryColor,
+                          isDarkMode: isDarkMode,
+                        ),
                       ),
                     ),
                     SizedBox(width: 12.w),
                     Expanded(
-                      child: _buildStatCard(
-                        icon: Icons.gamepad,
-                        label: isArabic ? 'المساهمات' : 'Contributions',
-                        value: '${totalShares}',
-                        color: AppTheme.infoColor,
-                        isDarkMode: isDarkMode,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/my-contributions');
+                        },
+                        borderRadius: BorderRadius.circular(16.r),
+                        child: _buildStatCard(
+                          icon: Icons.gamepad,
+                          label: isArabic ? 'المساهمات' : 'Contributions',
+                          value: '${totalShares}',
+                          color: AppTheme.infoColor,
+                          isDarkMode: isDarkMode,
+                        ),
                       ),
                     ),
                   ],
@@ -705,7 +729,7 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen> {
                   icon: Icons.person_outline,
                   title: isArabic ? 'معلومات الحساب' : 'Account Information',
                   onTap: () {
-                    // Navigate to account info
+                    Navigator.pushNamed(context, '/account-information');
                   },
                   isDarkMode: isDarkMode,
                 ),
@@ -713,7 +737,7 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen> {
                   icon: Icons.history,
                   title: isArabic ? 'سجل المعاملات' : 'Transaction History',
                   onTap: () {
-                    // Navigate to transaction history
+                    Navigator.pushNamed(context, '/transaction-history');
                   },
                   isDarkMode: isDarkMode,
                 ),
@@ -721,7 +745,7 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen> {
                   icon: Icons.card_giftcard,
                   title: isArabic ? 'المكافآت والإحالات' : 'Rewards & Referrals',
                   onTap: () {
-                    // Navigate to rewards
+                    Navigator.pushNamed(context, '/rewards');
                   },
                   isDarkMode: isDarkMode,
                 ),

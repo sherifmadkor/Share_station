@@ -55,9 +55,9 @@ class ClientService {
       if (referrerCode != null && referrerCode.isNotEmpty) {
         await _referralService.processReferral(
           newUserId: userId,
-          referralCode: referrerCode,
-          membershipFee: membershipFee,
-          userTier: 'client',
+          referrerId: referrerCode, // This is the referral code, will be resolved in processReferral
+          newUserTier: 'client',
+          subscriptionFee: membershipFee,
         );
       }
       
@@ -161,9 +161,8 @@ class ClientService {
       if (userData['recruiterId'] != null) {
         await _referralService.processActivityReferralEarnings(
           userId: userId,
-          transactionAmount: renewalFee,
+          activityFee: renewalFee,
           activityType: 'client_renewal',
-          activityDescription: 'Client membership renewal',
         );
       }
       

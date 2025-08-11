@@ -30,6 +30,10 @@ import 'presentation/screens/user/points_redemption_screen.dart';
 import 'presentation/screens/user/balance_details_screen.dart';
 import 'presentation/screens/user/queue_management_screen.dart';
 import 'presentation/screens/user/sell_game_screen.dart';
+import 'presentation/screens/user/account_information_screen.dart';
+import 'presentation/screens/user/transaction_history_screen.dart';
+import 'presentation/screens/user/rewards_screen.dart';
+import 'presentation/screens/user/enhanced_referral_dashboard.dart';
 // TODO: Create these screens when needed
 // import 'presentation/screens/user/referral_dashboard_screen.dart';
 // import 'presentation/screens/user/client_dashboard_screen.dart';
@@ -44,6 +48,7 @@ import 'presentation/screens/admin/manage_games_screen.dart';
 import 'presentation/screens/admin/manage_users_screen.dart';
 import 'presentation/screens/admin/analytics_screen.dart';
 import 'presentation/screens/admin/settings_screen.dart';
+import 'presentation/screens/admin/admin_referral_management.dart';
 
 // Routes
 import 'routes/app_routes.dart';
@@ -133,8 +138,12 @@ class ShareStationApp extends StatelessWidget {
                   AppRoutes.balanceDetails: (context) => const BalanceDetailsScreen(),
                   AppRoutes.queueManagement: (context) => const QueueManagementScreen(),
                   AppRoutes.sellGame: (context) => const SellGameScreen(),
-                  // TODO: Create these screens later
-                  // AppRoutes.referralDashboard: (context) => const ReferralDashboardScreen(),
+                  
+                  // Profile Related Routes
+                  AppRoutes.accountInformation: (context) => const AccountInformationScreen(),
+                  AppRoutes.transactionHistory: (context) => const TransactionHistoryScreen(),
+                  AppRoutes.rewards: (context) => const RewardsScreen(),
+                  AppRoutes.referralDashboard: (context) => const EnhancedReferralDashboard(),
                   // AppRoutes.clientDashboard: (context) => const ClientDashboardScreen(),
                   // AppRoutes.leaderboard: (context) => const LeaderboardScreen(),
                   // AppRoutes.netMetrics: (context) => const NetMetricsDashboardScreen(),
@@ -147,6 +156,7 @@ class ShareStationApp extends StatelessWidget {
                   AppRoutes.manageUsers: (context) => const ManageUsersScreen(),
                   AppRoutes.adminAnalytics: (context) => const AnalyticsScreen(),
                   AppRoutes.adminSettings: (context) => const SettingsScreen(),
+                  AppRoutes.adminReferralManagement: (context) => const AdminReferralManagement(),
                 },
 
                 // Builder for RTL support

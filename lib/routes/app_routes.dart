@@ -27,6 +27,11 @@ class AppRoutes {
   static const String clientDashboard = '/client-dashboard';
   static const String leaderboard = '/leaderboard';
   static const String netMetrics = '/net-metrics';
+  
+  // Profile Related Screens
+  static const String accountInformation = '/account-information';
+  static const String transactionHistory = '/transaction-history';
+  static const String rewards = '/rewards';
 
   // Admin Screens
   static const String adminDashboard = '/admin-dashboard';
@@ -35,4 +40,5 @@ class AppRoutes {
   static const String manageUsers = '/manage-users';
   static const String adminAnalytics = '/admin-analytics';
   static const String adminSettings = '/admin-settings';
+  static const String adminReferralManagement = '/admin-referral-management';
 }

@@ -74,6 +74,23 @@ class _BalanceDetailsScreenState extends State<BalanceDetailsScreen>
       // Separate active and expired entries
       _balanceEntries = entries.where((e) => e['isExpired'] != true).toList();
       _expiredEntries = entries.where((e) => e['isExpired'] == true).toList();
+      
+      // If referralEarnings exists but no referral balance entries, create synthetic entry
+      final referralEarnings = _balanceBreakdown['referralEarnings'] ?? 0.0;
+      if (referralEarnings > 0) {
+        final hasReferralEntries = _balanceEntries.any((e) => e['type'] == 'referralEarnings');
+        if (!hasReferralEntries) {
+          // Add synthetic referral earnings entry
+          _balanceEntries.insert(0, {
+            'id': 'referral_earnings_synthetic',
+            'type': 'referralEarnings',
+            'amount': referralEarnings,
+            'description': 'Referral commission earnings',
+            'earnedDate': Timestamp.now(),
+            'isExpired': false,
+          });
+        }
+      }
 
       // Sort by date
       _balanceEntries.sort((a, b) {

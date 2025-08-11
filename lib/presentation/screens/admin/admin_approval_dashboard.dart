@@ -11,6 +11,7 @@ import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/user_model.dart';
 import '../../../data/models/game_model.dart';
+import '../../../services/referral_service.dart';
 import '../../widgets/admin/game_approval_modal.dart';
 
 class AdminApprovalDashboard extends StatefulWidget {
@@ -209,9 +210,47 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
         backgroundColor: AppTheme.primaryColor,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadPendingCounts,
+          PopupMenuButton<String>(
+            icon: Icon(Icons.admin_panel_settings),
+            onSelected: (String value) {
+              switch (value) {
+                case 'fix_referrals':
+                  _fixReferralRecords();
+                  break;
+                case 'update_revenue_status':
+                  _updateReferralRevenueStatus();
+                  break;
+                case 'refresh':
+                  _loadPendingCounts();
+                  break;
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'fix_referrals',
+                child: ListTile(
+                  leading: Icon(FontAwesomeIcons.userGroup),
+                  title: Text('Fix Referral Records'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'update_revenue_status',
+                child: ListTile(
+                  leading: Icon(FontAwesomeIcons.coins),
+                  title: Text('Update Revenue Status'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'refresh',
+                child: ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('Refresh Data'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
         bottom: TabBar(
@@ -850,6 +889,149 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
     }
   }
 
+  Future<void> _fixReferralRecords() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Fix Referral Records'),
+          content: Text(
+            'This will scan all referral records and fix any that have referral codes instead of user IDs. This is a one-time maintenance operation.\n\nProceed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Fix Records'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Fixing referral records...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      try {
+        final referralService = ReferralService();
+        final success = await referralService.fixExistingReferralRecords();
+        
+        Navigator.of(context).pop(); // Close loading dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success 
+                ? 'Referral records fixed successfully!' 
+                : 'Error fixing referral records'),
+            backgroundColor: success ? AppTheme.successColor : AppTheme.errorColor,
+          ),
+        );
+
+        if (success) {
+          _loadPendingCounts(); // Refresh data
+        }
+      } catch (e) {
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _updateReferralRevenueStatus() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Update Referral Revenue Status'),
+          content: Text(
+            'This will check all pending referral revenues and move them to paid status if the referred member is now active. This fixes the 600 LE pending issue.\n\nProceed?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Update Status'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Updating revenue status...'),
+              ],
+            ),
+          );
+        },
+      );
+
+      try {
+        final referralService = ReferralService();
+        final success = await referralService.updateReferralRevenueStatus();
+        
+        Navigator.of(context).pop(); // Close loading dialog
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success 
+                ? 'Referral revenue statuses updated successfully! Check console logs for details.' 
+                : 'Error updating referral revenue statuses'),
+            backgroundColor: success ? AppTheme.successColor : AppTheme.errorColor,
+            duration: Duration(seconds: 4),
+          ),
+        );
+
+        if (success) {
+          _loadPendingCounts(); // Refresh data
+        }
+      } catch (e) {
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
   String _getAccountTypeDisplay(String? type, bool isArabic) {
     switch (type?.toLowerCase()) {
       case 'primary':
@@ -873,6 +1055,36 @@ class _AdminApprovalDashboardState extends State<AdminApprovalDashboard>
         'approvedAt': FieldValue.serverTimestamp(),
         'approvedBy': 'admin',
       });
+
+      // Check if this user was referred and process the referral if not already done
+      final recruiterId = data['recruiterId'] as String?;
+      if (recruiterId != null && recruiterId.isNotEmpty) {
+        print('User $userId was referred with code: $recruiterId. Processing referral...');
+        
+        // Check if referral record already exists
+        final existingReferrals = await _firestore
+            .collection('referrals')
+            .where('referredUserId', isEqualTo: userId)
+            .get();
+        
+        if (existingReferrals.docs.isEmpty) {
+          // No referral record exists, create it now
+          final tier = data['tier'] as String? ?? 'member';
+          final subscriptionFee = tier == 'client' ? 750.0 : 500.0;
+          
+          // Import and use ReferralService
+          final referralService = ReferralService();
+          await referralService.processReferral(
+            newUserId: userId,
+            referrerId: recruiterId, // Pass the referral code
+            newUserTier: tier,
+            subscriptionFee: subscriptionFee,
+          );
+          print('Referral processed for newly approved user');
+        } else {
+          print('Referral record already exists for user $userId');
+        }
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
