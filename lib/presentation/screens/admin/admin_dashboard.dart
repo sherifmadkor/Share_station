@@ -18,6 +18,7 @@ import '../admin/manage_users_screen.dart';
 import '../admin/manage_games_screen.dart';
 import '../admin/analytics_screen.dart';
 import '../admin/settings_screen.dart';
+import '../admin/manage_games_vault_screen.dart';
 import '../../../services/suspension_service.dart';
 import '../../../services/balance_service.dart';
 import '../../../services/queue_service.dart';
@@ -53,6 +54,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _pendingReturns = 0;
   int _activeQueues = 0;
   double _totalRevenue = 0;
+  int _vaultGames = 0;
+  int _fundingGames = 0;
+  int _pendingFundContributions = 0;
 
   // Borrow Window Status
   bool _isBorrowWindowOpen = false;
@@ -136,6 +140,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
       // Get active queues count
       final queueStats = await _queueService.getQueueStatistics();
 
+      // Get vault games statistics
+      int vaultGamesCount = 0;
+      int fundingGamesCount = 0;
+      int pendingFundContributions = 0;
+      try {
+        final vaultGamesQuery = await _firestore.collection('games_vault').get();
+        vaultGamesCount = vaultGamesQuery.docs.length;
+        
+        final fundingGamesQuery = await _firestore
+            .collection('games_vault')
+            .where('status', isEqualTo: 'funding')
+            .get();
+        fundingGamesCount = fundingGamesQuery.docs.length;
+        
+        final fundContributionsQuery = await _firestore
+            .collection('fund_contributions')
+            .where('status', isEqualTo: 'pending')
+            .count()
+            .get();
+        pendingFundContributions = fundContributionsQuery.count ?? 0;
+      } catch (e) {
+        print('Error loading vault statistics: $e');
+      }
+
       // Calculate revenue
       _totalRevenue = 0;
       for (var doc in usersQuery.docs) {
@@ -153,6 +181,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _activeBorrows = activeBorrowQuery.count ?? 0;
           _pendingReturns = pendingReturnsQuery.count ?? 0;
           _activeQueues = queueStats['totalActiveQueues'] ?? 0;
+          _vaultGames = vaultGamesCount;
+          _fundingGames = fundingGamesCount;
+          _pendingFundContributions = pendingFundContributions;
         });
       }
     } catch (e) {
@@ -1193,6 +1224,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
               context,
               MaterialPageRoute(
                 builder: (context) => const ManageGamesScreen(),
+              ),
+            ).then((_) => _loadStatistics());
+          },
+        ),
+
+        _buildAdminActionCard(
+          title: isArabic ? 'بدء تمويل لعبة' : 'Start Game Fund',
+          subtitle: isArabic ? '$_fundingGames قيد التمويل' : '$_fundingGames funding',
+          icon: FontAwesomeIcons.vault,
+          color: Colors.purple,
+          badge: _pendingFundContributions > 0 ? _pendingFundContributions.toString() : null,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const ManageGamesVaultScreen(),
               ),
             ).then((_) => _loadStatistics());
           },

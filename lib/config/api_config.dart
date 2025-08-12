@@ -23,7 +23,7 @@ class ApiConfig {
   static const Duration apiTimeout = Duration(seconds: 10);
   
   // Validate API key
-  static bool get isApiKeyValid => rawgApiKey != 'ba52d1f784c24f14896f868967ba0375' && rawgApiKey.isNotEmpty;
+  static bool get isApiKeyValid => rawgApiKey.isNotEmpty && rawgApiKey.length > 10;
   
   // Error messages
   static const String apiKeyNotSetMessage = 

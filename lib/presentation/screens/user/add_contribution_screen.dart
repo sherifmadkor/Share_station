@@ -14,6 +14,7 @@ import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/game_model.dart';
+import '../../../data/models/game_vault_model.dart';
 import '../../../services/contribution_service.dart';
 import '../../../services/game_database_service.dart';
 
@@ -49,6 +50,11 @@ class _AddContributionScreenState extends State<AddContributionScreen>
   String? _selectedFundGameId;
   Map<String, dynamic>? _selectedFundGame;
   List<Map<String, dynamic>> _availableFundGames = [];
+  
+  // --- Games Vault State Variables ---
+  List<GamesVaultModel> _vaultGames = [];
+  bool _isLoadingVaultGames = false;
+  GamesVaultModel? _selectedVaultGame;
 
   // --- Selected Values ---
   String _selectedEdition = 'Standard';
@@ -84,6 +90,7 @@ class _AddContributionScreenState extends State<AddContributionScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadAvailableFundGames();
+    _loadVaultGames();
     _initializeGameDatabase();
 
     // Listen to game title changes for suggestions
@@ -267,6 +274,57 @@ class _AddContributionScreenState extends State<AddContributionScreen>
       });
     } catch (e) {
       print('Error loading fund games: $e');
+    }
+  }
+
+  // Load vault games for enhanced fund contribution
+  Future<void> _loadVaultGames() async {
+    setState(() => _isLoadingVaultGames = true);
+    try {
+      print('Loading vault games...');
+      
+      // Try with status filter first
+      QuerySnapshot snapshot;
+      try {
+        snapshot = await _firestore
+            .collection('games_vault')
+            .where('status', whereIn: ['funding', 'funded'])
+            .orderBy('createdAt', descending: true)
+            .get();
+      } catch (e) {
+        // Fallback: get all vault games if index doesn't exist
+        print('Index error, fetching all vault games: $e');
+        snapshot = await _firestore
+            .collection('games_vault')
+            .orderBy('createdAt', descending: true)
+            .get();
+      }
+      
+      print('Found ${snapshot.docs.length} vault games');
+      
+      final games = <GamesVaultModel>[];
+      for (var doc in snapshot.docs) {
+        try {
+          final game = GamesVaultModel.fromFirestore(doc);
+          // Only include funding and funded games
+          if (game.status == VaultGameStatus.funding || game.status == VaultGameStatus.funded) {
+            games.add(game);
+            print('Loaded game: ${game.gameTitle} - Status: ${game.status.name}');
+          }
+        } catch (e) {
+          print('Error parsing game ${doc.id}: $e');
+        }
+      }
+      
+      setState(() {
+        _vaultGames = games;
+        _isLoadingVaultGames = false;
+      });
+      
+      print('Final vault games count: ${_vaultGames.length}');
+    } catch (e) {
+      print('Error loading vault games: $e');
+      setState(() => _isLoadingVaultGames = false);
     }
   }
 
@@ -578,6 +636,80 @@ class _AddContributionScreenState extends State<AddContributionScreen>
       } else {
         throw Exception(result['message']);
       }
+    } catch (e) {
+      Fluttertoast.showToast(
+        msg: 'Error: ${e.toString()}',
+        backgroundColor: AppTheme.errorColor,
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Submit enhanced fund contribution
+  Future<void> _submitEnhancedFundContribution() async {
+    if (_selectedVaultGame == null) return;
+    
+    if (_fundAmountController.text.isEmpty) {
+      Fluttertoast.showToast(
+        msg: 'Please enter contribution amount',
+        backgroundColor: AppTheme.warningColor,
+      );
+      return;
+    }
+    
+    final amount = double.tryParse(_fundAmountController.text) ?? 0;
+    if (amount < 50) {
+      Fluttertoast.showToast(
+        msg: 'Minimum contribution is 50 LE',
+        backgroundColor: AppTheme.warningColor,
+      );
+      return;
+    }
+    
+    setState(() => _isLoading = true);
+    
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final currentUser = authProvider.currentUser;
+      
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+      
+      String? receiptUrl;
+      if (_paymentReceiptImage != null) {
+        receiptUrl = await _uploadReceiptImage();
+      }
+      
+      // Create fund contribution request
+      await _firestore.collection('fund_contributions').add({
+        'userId': currentUser.uid,
+        'userName': currentUser.name,
+        'vaultGameId': _selectedVaultGame!.id,
+        'gameTitle': _selectedVaultGame!.gameTitle,
+        'amount': amount,
+        'paymentMethod': _selectedPaymentMethod,
+        'receiptUrl': receiptUrl,
+        'isLateContribution': _selectedVaultGame!.isFullyFunded,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      Fluttertoast.showToast(
+        msg: 'Fund contribution submitted for approval!',
+        backgroundColor: AppTheme.successColor,
+        toastLength: Toast.LENGTH_LONG,
+      );
+      
+      // Clear form
+      _fundAmountController.clear();
+      setState(() {
+        _paymentReceiptImage = null;
+        _selectedVaultGame = null;
+      });
+      
+      Navigator.pop(context);
     } catch (e) {
       Fluttertoast.showToast(
         msg: 'Error: ${e.toString()}',
@@ -1069,79 +1201,373 @@ class _AddContributionScreenState extends State<AddContributionScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            isArabic ? 'المساهمة في تمويل لعبة:' : 'Contribute to Fund a Game:',
-            style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold),
+          // Header with refresh button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isArabic ? 'المساهمة في تمويل لعبة' : 'Fund a Game',
+                style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: Icon(Icons.refresh),
+                onPressed: _loadVaultGames,
+              ),
+            ],
           ),
-          SizedBox(height: 12.h),
-
-          if (_availableFundGames.isEmpty)
+          
+          SizedBox(height: 16.h),
+          
+          if (_isLoadingVaultGames)
+            Center(child: CircularProgressIndicator())
+          else if (_vaultGames.isEmpty)
             Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 24.h),
-                child: Text(
-                  isArabic ? 'لا توجد ألعاب متاحة للتمويل حالياً' : 'No games available for funding currently',
-                  style: TextStyle(fontSize: 14.sp, color: Colors.grey),
-                ),
+              child: Column(
+                children: [
+                  Icon(Icons.inbox, size: 64.sp, color: Colors.grey),
+                  SizedBox(height: 16.h),
+                  Text(
+                    isArabic 
+                      ? 'لا توجد ألعاب متاحة للتمويل حالياً' 
+                      : 'No games available for funding',
+                    style: TextStyle(fontSize: 16.sp, color: Colors.grey),
+                  ),
+                ],
               ),
             )
           else
-            DropdownButtonFormField<String>(
-              value: _selectedFundGameId,
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: isArabic ? 'اختر اللعبة' : 'Select Game',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.r)),
-              ),
-              items: _availableFundGames.map((game) {
-                return DropdownMenuItem<String>(
-                  value: game['id'],
-                  child: Text(game['title'] ?? 'Unknown Game'),
+            // Games list with funding progress
+            ListView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              itemCount: _vaultGames.length,
+              itemBuilder: (context, index) {
+                final game = _vaultGames[index];
+                final isSelected = _selectedVaultGame?.id == game.id;
+                
+                return Card(
+                  margin: EdgeInsets.only(bottom: 12.h),
+                  elevation: isSelected ? 8 : 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12.r),
+                    side: BorderSide(
+                      color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+                      width: 2.w,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedVaultGame = isSelected ? null : game;
+                        if (!isSelected) {
+                          _fundAmountController.clear();
+                        }
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12.r),
+                    child: Padding(
+                      padding: EdgeInsets.all(16.w),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Game title and status
+                          Row(
+                            children: [
+                              if (game.coverImageUrl != null)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8.r),
+                                  child: Image.network(
+                                    game.coverImageUrl!,
+                                    width: 60.w,
+                                    height: 60.w,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => 
+                                      Icon(FontAwesomeIcons.gamepad, size: 60.w),
+                                  ),
+                                )
+                              else
+                                Icon(FontAwesomeIcons.gamepad, size: 60.w),
+                              SizedBox(width: 12.w),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      game.gameTitle,
+                                      style: TextStyle(
+                                        fontSize: 18.sp,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4.h),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 8.w,
+                                            vertical: 2.h,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: game.status == VaultGameStatus.funding
+                                                ? AppTheme.successColor.withOpacity(0.2)
+                                                : AppTheme.infoColor.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(4.r),
+                                          ),
+                                          child: Text(
+                                            game.status.displayName,
+                                            style: TextStyle(
+                                              fontSize: 12.sp,
+                                              color: game.status == VaultGameStatus.funding
+                                                  ? AppTheme.successColor
+                                                  : AppTheme.infoColor,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(width: 8.w),
+                                        Text(
+                                          'Batch #${game.batchNumber}',
+                                          style: TextStyle(
+                                            fontSize: 12.sp,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          
+                          SizedBox(height: 16.h),
+                          
+                          // Funding progress bar
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '${game.currentFunding.toStringAsFixed(0)} / ${game.targetAmount.toStringAsFixed(0)} LE',
+                                    style: TextStyle(
+                                      fontSize: 14.sp,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${game.fundingPercentage.toStringAsFixed(1)}%',
+                                    style: TextStyle(
+                                      fontSize: 14.sp,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.primaryColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8.h),
+                              LinearProgressIndicator(
+                                value: game.fundingPercentage / 100,
+                                minHeight: 8.h,
+                                backgroundColor: Colors.grey.withOpacity(0.2),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  game.isFullyFunded 
+                                      ? AppTheme.successColor 
+                                      : AppTheme.primaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          
+                          SizedBox(height: 12.h),
+                          
+                          // Contributors and share info
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.people, size: 16.sp, color: Colors.grey),
+                                  SizedBox(width: 4.w),
+                                  Text(
+                                    '${game.totalContributors} ${isArabic ? "مساهم" : "contributors"}',
+                                    style: TextStyle(fontSize: 13.sp, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                              Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 8.w,
+                                  vertical: 4.h,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: game.acceptingNewShares
+                                      ? Colors.green.withOpacity(0.1)
+                                      : Colors.red.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4.r),
+                                ),
+                                child: Text(
+                                  isArabic 
+                                      ? 'قيمة السهم: ${game.currentShareValue.toStringAsFixed(0)} ج.م'
+                                      : 'Share Value: ${game.currentShareValue.toStringAsFixed(0)} LE',
+                                  style: TextStyle(
+                                    fontSize: 12.sp,
+                                    color: game.acceptingNewShares
+                                        ? Colors.green
+                                        : Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          
+                          // Show contribution input if selected
+                          if (isSelected) ...[
+                            SizedBox(height: 16.h),
+                            Divider(),
+                            SizedBox(height: 16.h),
+                            
+                            // Late contribution warning if fully funded
+                            if (game.isFullyFunded)
+                              Container(
+                                padding: EdgeInsets.all(12.w),
+                                margin: EdgeInsets.only(bottom: 16.h),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.warningColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8.r),
+                                  border: Border.all(color: AppTheme.warningColor),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.info_outline, 
+                                      color: AppTheme.warningColor, 
+                                      size: 20.sp
+                                    ),
+                                    SizedBox(width: 8.w),
+                                    Expanded(
+                                      child: Text(
+                                        isArabic
+                                            ? 'هذه اللعبة ممولة بالكامل. سيتم توزيع مساهمتك كاسترداد للمساهمين الأصليين.'
+                                            : 'This game is fully funded. Your contribution will be distributed as refunds to original contributors.',
+                                        style: TextStyle(
+                                          fontSize: 12.sp,
+                                          color: AppTheme.warningColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            
+                            // Amount input
+                            TextField(
+                              controller: _fundAmountController,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: isArabic ? 'المبلغ (جنيه مصري)' : 'Amount (EGP)',
+                                hintText: isArabic ? 'الحد الأدنى 50 جنيه' : 'Minimum 50 LE',
+                                prefixIcon: Icon(Icons.attach_money, color: AppTheme.primaryColor),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12.r),
+                                ),
+                              ),
+                            ),
+                            
+                            SizedBox(height: 12.h),
+                            
+                            // Payment method
+                            DropdownButtonFormField<String>(
+                              value: _selectedPaymentMethod,
+                              decoration: InputDecoration(
+                                labelText: isArabic ? 'طريقة الدفع' : 'Payment Method',
+                                prefixIcon: Icon(Icons.payment, color: AppTheme.primaryColor),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12.r),
+                                ),
+                              ),
+                              items: ['InstaPay', 'Bank Transfer', 'Vodafone Cash']
+                                  .map((method) => DropdownMenuItem(
+                                        value: method,
+                                        child: Text(method),
+                                      ))
+                                  .toList(),
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedPaymentMethod = value ?? 'InstaPay';
+                                });
+                              },
+                            ),
+                            
+                            SizedBox(height: 12.h),
+                            
+                            // Receipt upload
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _pickPaymentReceipt,
+                                    icon: Icon(Icons.upload_file),
+                                    label: Text(
+                                      _paymentReceiptImage != null
+                                          ? (isArabic ? 'تم اختيار الإيصال' : 'Receipt Selected')
+                                          : (isArabic ? 'رفع إيصال الدفع' : 'Upload Payment Receipt'),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: EdgeInsets.symmetric(vertical: 12.h),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12.r),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (_paymentReceiptImage != null) ...[
+                                  SizedBox(width: 8.w),
+                                  IconButton(
+                                    icon: Icon(Icons.clear, color: AppTheme.errorColor),
+                                    onPressed: () {
+                                      setState(() {
+                                        _paymentReceiptImage = null;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedFundGameId = value;
-                  if (value != null) {
-                    _selectedFundGame = _availableFundGames.firstWhere((doc) => doc['id'] == value);
-                  } else {
-                    _selectedFundGame = null;
-                  }
-                });
               },
             ),
-
-          if (_selectedFundGameId != null) ...[
+          
+          // Submit button
+          if (_selectedVaultGame != null) ...[
             SizedBox(height: 24.h),
-
-            TextField(
-              controller: _fundAmountController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: isArabic ? 'المبلغ (جنيه مصري)' : 'Amount (EGP)',
-                hintText: isArabic ? 'الحد الأدنى 50 جنيه' : 'Minimum 50 LE',
-                prefixIcon: Icon(Icons.attach_money, color: AppTheme.primaryColor),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.r)),
-              ),
-            ),
-
-            SizedBox(height: 32.h),
-
             SizedBox(
               width: double.infinity,
               height: 56.h,
               child: ElevatedButton(
-                onPressed: _isLoading ? null : _submitFundContributionRequest,
+                onPressed: _isLoading ? null : _submitEnhancedFundContribution,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.successColor,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16.r),
+                  ),
                 ),
                 child: _isLoading
                     ? CircularProgressIndicator(color: Colors.white)
                     : Text(
-                  isArabic ? 'إرسال طلب التمويل' : 'Submit Fund Request',
-                  style: TextStyle(fontSize: 18.sp, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
+                        isArabic ? 'إرسال طلب التمويل' : 'Submit Fund Request',
+                        style: TextStyle(
+                          fontSize: 18.sp,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
               ),
             ),
           ],

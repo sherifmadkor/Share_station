@@ -38,6 +38,7 @@ class AppRoutes {
   static const String adminDashboard = '/admin-dashboard';
   static const String adminApproval = '/admin-approval';
   static const String manageGames = '/manage-games';
+  static const String manageGamesVault = '/manage-games-vault';
   static const String manageUsers = '/manage-users';
   static const String adminAnalytics = '/admin-analytics';
   static const String adminSettings = '/admin-settings';

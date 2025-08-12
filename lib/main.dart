@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:provider/provider.dart';
+import 'package:share_station/presentation/screens/admin/manage_games_vault_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'presentation/providers/app_provider.dart';
@@ -169,6 +170,7 @@ class ShareStationApp extends StatelessWidget {
                   // TODO: Create AdminApprovalDashboard screen
                   // AppRoutes.adminApproval: (context) => const AdminApprovalDashboard(),
                   AppRoutes.manageGames: (context) => const ManageGamesScreen(),
+                  AppRoutes.manageGamesVault: (context) => const ManageGamesVaultScreen(),
                   AppRoutes.manageUsers: (context) => const ManageUsersScreen(),
                   AppRoutes.manageReturns: (context) => const ManageReturnRequestsScreen(),
                   AppRoutes.adminQueueManagement: (context) => const AdminQueueManagementScreen(),
